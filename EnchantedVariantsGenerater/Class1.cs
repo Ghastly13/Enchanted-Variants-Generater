@@ -8,6 +8,15 @@ namespace EnchantedVariantsGenerater
     {
         public bool CheckExistingGenerated { get; set; } = true;
         public bool VerboseLogging { get; set; } = false;
+
+        // Before generating an enchanted variant, look for one that already exists in the load order:
+        // a playable record whose template is the same base item and whose enchantment is the same.
+        // If one exists, no new record is generated.
+        public bool SkipDuplicates { get; set; } = true;
+
+        // When a duplicate is skipped, put the existing variant into the generated leveled lists in its place,
+        // so the lists stay complete. False leaves the duplicate out of the lists entirely.
+        public bool AddDuplicatesToLeveledLists { get; set; } = true;
     }
 
     public class InputJSON

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Threading;
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Synthesis;
 using Mutagen.Bethesda.Skyrim;
@@ -44,6 +46,47 @@ namespace EnchantedVariantsGenerater
         }
     }
 
+    public record ExistingVariant(FormKey FormKey, string? EditorID);
+
+    // Enchanted variants that already exist in the load order, keyed by (base item, enchantment).
+    public class DuplicateIndex
+    {
+        private readonly Dictionary<(FormKey BaseItem, FormKey Enchantment), List<ExistingVariant>> _variants = new();
+        private int _skipped;
+
+        public int Count { get; private set; }
+        public int Skipped => _skipped;
+
+        public void Add(FormKey baseItem, FormKey enchantment, ExistingVariant variant)
+        {
+            if (!_variants.TryGetValue((baseItem, enchantment), out var list))
+            {
+                list = new List<ExistingVariant>();
+                _variants[(baseItem, enchantment)] = list;
+            }
+            list.Add(variant);
+            Count++;
+        }
+
+        // Ignores a record carrying the EditorID this patcher would generate: that is its own output from an earlier run.
+        public bool TryFind(FormKey baseItem, FormKey enchantment, string generatedEditorID, [NotNullWhen(true)] out ExistingVariant? found)
+        {
+            found = null;
+            if (!_variants.TryGetValue((baseItem, enchantment), out var list)) return false;
+            foreach (var variant in list)
+            {
+                if (variant.EditorID != generatedEditorID)
+                {
+                    found = variant;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public void RecordSkip() => Interlocked.Increment(ref _skipped);
+    }
+
     public class InputThing
     {
         //                EditorID, Info
@@ -83,7 +126,7 @@ namespace EnchantedVariantsGenerater
             return rawJSON;
         }
 
-        public static List<InputThing> GetInputs(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config)
+        public static List<InputThing> GetInputs(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, string dataPath)
         {
             Console.WriteLine("Reading input files");
             List<string> enabledMods = new();
@@ -96,9 +139,9 @@ namespace EnchantedVariantsGenerater
                 }
             }
             List<InputThing> inputs = new();
-            foreach (var folder in Directory.EnumerateDirectories(state.ExtraSettingsDataPath + "\\input"))
+            foreach (var folder in Directory.EnumerateDirectories(Path.Combine(dataPath, "input")))
             {
-                Console.WriteLine("Reading folder: " + folder.Replace(state.ExtraSettingsDataPath, ""));
+                Console.WriteLine("Reading folder: " + folder.Replace(dataPath, ""));
                 InputThing input = new();
 
                 /* TODO
@@ -117,7 +160,7 @@ namespace EnchantedVariantsGenerater
                 foreach (var file in Directory.GetFiles(folder))
                 {
                     string rawJSON = ReadInputFile(file);
-                    Console.WriteLine("Reading input file \"" + file.Replace(state.ExtraSettingsDataPath, "")  + "\"");
+                    Console.WriteLine("Reading input file \"" + file.Replace(dataPath, "")  + "\"");
                     var inputJSON = JsonConvert.DeserializeObject<InputJSON>(rawJSON);
                     if (inputJSON == null) throw new Exception("Cannot read file \"" + file + "\"!");
 
@@ -403,7 +446,7 @@ namespace EnchantedVariantsGenerater
             return armor;
         }
 
-        public static UnsafeThreadStuff GenerateWeapon(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, InputThing input, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache)
+        public static UnsafeThreadStuff GenerateWeapon(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, InputThing input, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, DuplicateIndex duplicates)
         {
             UnsafeThreadStuff stuff = new();
             foreach (var item in input.Weapons.Values)
@@ -424,6 +467,17 @@ namespace EnchantedVariantsGenerater
                 foreach (var enchantmentInfo in input.Enchantments.Values)
                 {
                     var enchanted_item_EditorID = "Ench_" + item.EditorID + "_" + enchantmentInfo.EditorID;
+
+                    if (config.SkipDuplicates && duplicates.TryFind(itemGetter.FormKey, enchantmentInfo.Enchantment.FormKey, enchanted_item_EditorID, out var duplicate))
+                    { // An enchanted variant of this item with this enchantment already exists: don't make another
+                        duplicates.RecordSkip();
+                        if (config.VerboseLogging) Console.WriteLine("Skipping duplicate \"" + enchanted_item_EditorID + "\": already exists as \"" + duplicate.EditorID + "\" (" + duplicate.FormKey + ")");
+                        if (config.AddDuplicatesToLeveledLists)
+                        {
+                            UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, duplicate.FormKey, duplicate.EditorID ?? duplicate.FormKey.ToString());
+                        }
+                        continue;
+                    }
                     var enchanted_item = GetEnchantedWeapon(linkCache, state.PatchMod, enchanted_item_EditorID, config.CheckExistingGenerated, out var EnchantedItemAlreadyExists, enchantmentInfo.Enchantment.ToNullableLink(), itemGetter.ToNullableLink());
                     var enchanted_item_name = enchantmentInfo.Prefix + itemGetter.Name + enchantmentInfo.Suffix;
 
@@ -532,78 +586,13 @@ namespace EnchantedVariantsGenerater
                     }
 
                     // Set Leveled Lists
-                    if (enchantmentInfo.LeveledLists != null)
-                    {
-                        foreach (var leveledlistinfo in enchantmentInfo.LeveledLists)
-                        {
-                            var leveledlisteditorid = leveledlistinfo.LeveledListPrefix + item.EditorID + leveledlistinfo.LeveledListSuffix;
-                            bool leveledListAlreadyExists = true;
-                            LeveledItem leveledlist;
-                            if (leveledlists.TryGetValue(leveledlisteditorid, out var idk))
-                            {
-                                leveledlist = idk;
-                            }
-                            else
-                            {
-                                leveledlist = GetLeveledList(linkCache, state.PatchMod, leveledlisteditorid, config.CheckExistingGenerated, out var b); // Get leveled list
-                                                                                                                                    //leveledlist.Entries?.Clear();
-                                leveledListAlreadyExists = b;
-                                leveledlists.Add(leveledlisteditorid, leveledlist);
-                            }
-
-                            if (leveledListAlreadyExists)
-                            {
-                                if (leveledlist.Entries == null)
-                                {
-                                    leveledlist.Entries = new();
-                                }
-
-                                bool addtoleveledlist = true;
-                                if (leveledlistinfo.Mode == "Remove")
-                                {
-                                    addtoleveledlist = false;
-                                }
-                                foreach (var entry in leveledlist.Entries)
-                                {
-                                    if (entry.Data?.Reference.FormKey == enchanted_item.FormKey)
-                                    { // Check if item already exists in leveled list
-                                        if (leveledlistinfo.Mode == "Remove")
-                                        {
-                                            leveledlist.Entries.Remove(entry);
-                                            Console.WriteLine("Removing item: " + enchanted_item_EditorID + " from leveledlist: " + leveledlist.EditorID);
-                                            stuff.LeveledListsToSet.Add(leveledlist);
-                                        }
-                                        else
-                                        {
-                                            addtoleveledlist = false;
-                                        }
-                                        break;
-                                    }
-                                }
-                                if (addtoleveledlist)
-                                {
-                                    AddToLeveledList(leveledlist, enchanted_item.FormKey);
-                                    Console.WriteLine("Adding item: " + enchanted_item_EditorID + " to leveledlist: " + leveledlisteditorid);
-                                    stuff.LeveledListsToSet.Add(leveledlist);
-                                }
-                            }
-                            else
-                            {
-                                if (leveledlistinfo.Mode == "Add")
-                                {
-                                    AddToLeveledList(leveledlist, enchanted_item.FormKey);
-                                    Console.WriteLine("Adding item: " + enchanted_item_EditorID + " to leveledlist: " + leveledlisteditorid);
-                                    stuff.LeveledListsToSet.Add(leveledlist);
-                                }
-                            }
-                        }
-                    }
+                    UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, enchanted_item.FormKey, enchanted_item_EditorID);
                 }
             }
             return stuff;
         }
 
-        public static UnsafeThreadStuff GenerateArmor(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, InputThing input, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache)
+        public static UnsafeThreadStuff GenerateArmor(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, InputThing input, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, DuplicateIndex duplicates)
         {
             UnsafeThreadStuff stuff = new();
             foreach (var item in input.Armors.Values)
@@ -624,6 +613,17 @@ namespace EnchantedVariantsGenerater
                 foreach (var enchantmentInfo in input.Enchantments.Values)
                 {
                     var enchanted_item_EditorID = "Ench_" + item.EditorID + "_" + enchantmentInfo.EditorID;
+
+                    if (config.SkipDuplicates && duplicates.TryFind(itemGetter.FormKey, enchantmentInfo.Enchantment.FormKey, enchanted_item_EditorID, out var duplicate))
+                    { // An enchanted variant of this item with this enchantment already exists: don't make another
+                        duplicates.RecordSkip();
+                        if (config.VerboseLogging) Console.WriteLine("Skipping duplicate \"" + enchanted_item_EditorID + "\": already exists as \"" + duplicate.EditorID + "\" (" + duplicate.FormKey + ")");
+                        if (config.AddDuplicatesToLeveledLists)
+                        {
+                            UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, duplicate.FormKey, duplicate.EditorID ?? duplicate.FormKey.ToString());
+                        }
+                        continue;
+                    }
                     var enchanted_item = GetEnchantedArmor(linkCache, state.PatchMod, enchanted_item_EditorID, config.CheckExistingGenerated, out var EnchantedItemAlreadyExists, enchantmentInfo.Enchantment.ToNullableLink(), itemGetter.ToNullableLink());
                     var enchanted_item_name = enchantmentInfo.Prefix + itemGetter.Name + enchantmentInfo.Suffix;
 
@@ -718,75 +718,112 @@ namespace EnchantedVariantsGenerater
                     }
 
                     // Set Leveled Lists
-                    if (enchantmentInfo.LeveledLists != null)
-                    {
-                        foreach (var leveledlistinfo in enchantmentInfo.LeveledLists)
-                        {
-                            var leveledlisteditorid = leveledlistinfo.LeveledListPrefix + item.EditorID + leveledlistinfo.LeveledListSuffix;
-                            bool leveledListAlreadyExists = true;
-                            LeveledItem leveledlist;
-                            if (leveledlists.TryGetValue(leveledlisteditorid, out var idk))
-                            {
-                                leveledlist = idk;
-                            }
-                            else
-                            {
-                                leveledlist = GetLeveledList(linkCache, state.PatchMod, leveledlisteditorid, config.CheckExistingGenerated, out var b); // Get leveled list
-                                                                                                                                                        //leveledlist.Entries?.Clear();
-                                leveledListAlreadyExists = b;
-                                leveledlists.Add(leveledlisteditorid, leveledlist);
-                            }
-
-                            if (leveledListAlreadyExists)
-                            {
-                                if (leveledlist.Entries == null)
-                                {
-                                    leveledlist.Entries = new();
-                                }
-
-                                bool addtoleveledlist = true;
-                                if (leveledlistinfo.Mode == "Remove")
-                                {
-                                    addtoleveledlist = false;
-                                }
-                                foreach (var entry in leveledlist.Entries)
-                                {
-                                    if (entry.Data?.Reference.FormKey == enchanted_item.FormKey)
-                                    { // Check if item already exists in leveled list
-                                        if (leveledlistinfo.Mode == "Remove")
-                                        {
-                                            leveledlist.Entries.Remove(entry);
-                                            Console.WriteLine("Removing item: " + enchanted_item_EditorID + " from leveledlist: " + leveledlist.EditorID);
-                                            stuff.LeveledListsToSet.Add(leveledlist);
-                                        }
-                                        else
-                                        {
-                                            addtoleveledlist = false;
-                                        }
-                                        break;
-                                    }
-                                }
-                                if (addtoleveledlist)
-                                {
-                                    AddToLeveledList(leveledlist, enchanted_item.FormKey);
-                                    Console.WriteLine("Adding item: " + enchanted_item_EditorID + " to leveledlist: " + leveledlisteditorid);
-                                    stuff.LeveledListsToSet.Add(leveledlist);
-                                }
-                            }
-                            else
-                            {
-                                if (leveledlistinfo.Mode == "Add")
-                                {
-                                    AddToLeveledList(leveledlist, enchanted_item.FormKey);
-                                    Console.WriteLine("Adding item: " + enchanted_item_EditorID + " to leveledlist: " + leveledlisteditorid);
-                                    stuff.LeveledListsToSet.Add(leveledlist);
-                                }
-                            }
-                        }
-                    }
+                    UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, enchanted_item.FormKey, enchanted_item_EditorID);
                 }
             }
             return stuff;
+        }
+
+        // Adds (or, for Mode "Remove", removes) one enchanted item in the generated leveled lists of its base item.
+        public static void UpdateLeveledLists(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, UnsafeThreadStuff stuff, Dictionary<string, LeveledItem> leveledlists, EnchantmentInfo enchantmentInfo, string itemEditorID, FormKey entry, string entryLabel)
+        {
+            if (enchantmentInfo.LeveledLists == null) return;
+
+            foreach (var leveledlistinfo in enchantmentInfo.LeveledLists)
+            {
+                var leveledlisteditorid = leveledlistinfo.LeveledListPrefix + itemEditorID + leveledlistinfo.LeveledListSuffix;
+                bool leveledListAlreadyExists = true;
+                LeveledItem leveledlist;
+                if (leveledlists.TryGetValue(leveledlisteditorid, out var cached))
+                {
+                    leveledlist = cached;
+                }
+                else
+                {
+                    leveledlist = GetLeveledList(linkCache, state.PatchMod, leveledlisteditorid, config.CheckExistingGenerated, out var b);
+                    leveledListAlreadyExists = b;
+                    leveledlists.Add(leveledlisteditorid, leveledlist);
+                }
+
+                if (leveledListAlreadyExists)
+                {
+                    leveledlist.Entries ??= new();
+
+                    bool addtoleveledlist = leveledlistinfo.Mode != "Remove";
+                    foreach (var existingEntry in leveledlist.Entries)
+                    {
+                        if (existingEntry.Data?.Reference.FormKey == entry)
+                        { // Check if item already exists in leveled list
+                            if (leveledlistinfo.Mode == "Remove")
+                            {
+                                leveledlist.Entries.Remove(existingEntry);
+                                Console.WriteLine("Removing item: " + entryLabel + " from leveledlist: " + leveledlist.EditorID);
+                                stuff.LeveledListsToSet.Add(leveledlist);
+                            }
+                            else
+                            {
+                                addtoleveledlist = false;
+                            }
+                            break;
+                        }
+                    }
+                    if (addtoleveledlist)
+                    {
+                        AddToLeveledList(leveledlist, entry);
+                        Console.WriteLine("Adding item: " + entryLabel + " to leveledlist: " + leveledlisteditorid);
+                        stuff.LeveledListsToSet.Add(leveledlist);
+                    }
+                }
+                else if (leveledlistinfo.Mode == "Add")
+                {
+                    AddToLeveledList(leveledlist, entry);
+                    Console.WriteLine("Adding item: " + entryLabel + " to leveledlist: " + leveledlisteditorid);
+                    stuff.LeveledListsToSet.Add(leveledlist);
+                }
+            }
+        }
+
+        // Every playable enchanted weapon in the load order that names a template (base) weapon.
+        public static DuplicateIndex IndexExistingWeaponVariants(IPatcherState<ISkyrimMod, ISkyrimModGetter> state)
+        {
+            var index = new DuplicateIndex();
+            foreach (var weapon in state.LoadOrder.PriorityOrder.Weapon().WinningOverrides())
+            {
+                if (weapon.Template.IsNull || weapon.ObjectEffect.IsNull) continue;
+                if (weapon.Data != null && weapon.Data.Flags.HasFlag(WeaponData.Flag.NonPlayable)) continue;
+                index.Add(weapon.Template.FormKey, weapon.ObjectEffect.FormKey, new ExistingVariant(weapon.FormKey, weapon.EditorID));
+            }
+            return index;
+        }
+
+        // Every playable enchanted armor in the load order that names a template (base) armor.
+        public static DuplicateIndex IndexExistingArmorVariants(IPatcherState<ISkyrimMod, ISkyrimModGetter> state)
+        {
+            var index = new DuplicateIndex();
+            foreach (var armor in state.LoadOrder.PriorityOrder.Armor().WinningOverrides())
+            {
+                if (armor.TemplateArmor.IsNull || armor.ObjectEffect.IsNull) continue;
+                if (armor.MajorFlags.HasFlag(Armor.MajorFlag.NonPlayable)) continue;
+                index.Add(armor.TemplateArmor.FormKey, armor.ObjectEffect.FormKey, new ExistingVariant(armor.FormKey, armor.EditorID));
+            }
+            return index;
+        }
+
+        // A local copy of this patcher gets its own data folder, named after the project. If that folder has no
+        // input files, use the git patcher's folder, so both versions share one set of inputs.
+        public static string ResolveDataPath(IPatcherState<ISkyrimMod, ISkyrimModGetter> state)
+        {
+            string own = state.ExtraSettingsDataPath?.ToString() ?? throw new Exception("Synthesis did not provide a data folder");
+            if (Directory.Exists(Path.Combine(own, "input"))) return own;
+
+            string parent = Path.GetDirectoryName(own.TrimEnd('\\', '/')) ?? own;
+            string shared = Path.Combine(parent, "Enchanted-Variants-Generater");
+            if (Directory.Exists(Path.Combine(shared, "input")))
+            {
+                Console.WriteLine("No input folder in \"" + own + "\"; using \"" + shared + "\"");
+                return shared;
+            }
+            throw new Exception("No input folder found in \"" + own + "\" or \"" + shared + "\"");
         }
 
         public static async Task<int> Main(string[] args)
@@ -801,19 +838,34 @@ namespace EnchantedVariantsGenerater
         public static void RunPatch(IPatcherState<ISkyrimMod, ISkyrimModGetter> state)
         {
             // Read JSON Files
-            Config config = GetConfig(Path.Combine(state.ExtraSettingsDataPath, "config.hjson"));
-            List<InputThing> inputs = GetInputs(state, config);
+            string dataPath = ResolveDataPath(state);
+            Config config = GetConfig(Path.Combine(dataPath, "config.hjson"));
+            List<InputThing> inputs = GetInputs(state, config, dataPath);
 
             var linkcache = state.LoadOrder.ToImmutableLinkCache();
+
+            var weaponDuplicates = new DuplicateIndex();
+            var armorDuplicates = new DuplicateIndex();
+            if (config.SkipDuplicates)
+            {
+                weaponDuplicates = IndexExistingWeaponVariants(state);
+                armorDuplicates = IndexExistingArmorVariants(state);
+                Console.WriteLine("Checking for duplicates against " + weaponDuplicates.Count + " existing enchanted weapons and " + armorDuplicates.Count + " existing enchanted armors");
+            }
 
             Console.WriteLine("Running Generator");
             List<Task<UnsafeThreadStuff>> tasks = new();
             foreach (var input in inputs)
             {
-                tasks.Add(Task<UnsafeThreadStuff>.Factory.StartNew(() => GenerateArmor(state, config, input, linkcache)));
-                tasks.Add(Task<UnsafeThreadStuff>.Factory.StartNew(() => GenerateWeapon(state, config, input, linkcache)));
+                tasks.Add(Task<UnsafeThreadStuff>.Factory.StartNew(() => GenerateArmor(state, config, input, linkcache, armorDuplicates)));
+                tasks.Add(Task<UnsafeThreadStuff>.Factory.StartNew(() => GenerateWeapon(state, config, input, linkcache, weaponDuplicates)));
             }
             Task.WaitAll(tasks.ToArray());
+            if (config.SkipDuplicates)
+            {
+                Console.WriteLine("Skipped " + weaponDuplicates.Skipped + " weapons and " + armorDuplicates.Skipped + " armors that already had an enchanted variant"
+                    + (config.AddDuplicatesToLeveledLists ? " (the existing variants were added to the leveled lists instead)" : ""));
+            }
             Console.WriteLine("Finishing Up!");
             foreach(var task in tasks)
             {

@@ -1,5 +1,6 @@
 {
 	"CheckExistingGenerated": true,
-	"VerboseLogging": false
+	"VerboseLogging": false,
+	"SkipDuplicates": true,
+	"AddDuplicatesToLeveledLists": true
 }
-
