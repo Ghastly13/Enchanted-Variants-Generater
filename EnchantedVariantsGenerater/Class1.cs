@@ -36,6 +36,10 @@ namespace EnchantedVariantsGenerater
         // With Thaumaturgy, write SkyPatcher INIs (applied after other mods') that restore Thaumaturgy's enchantment
         // names on existing enchanted items where another mod's SkyPatcher renames (WACCF's) replace them at runtime
         public bool OverrideRuntimeEnchantmentNames { get; set; } = true;
+
+        // Where Paths of Empyrean (SKSE\Plugins\POE\Weapon) and SkyPatcher INIs (e.g. WACCF's) both rename an item, merge
+        // the two ("Ancient Nord Supple Shortbow") and write the merged name to both, since their run order is unknown
+        public bool ReconcileRuntimeRenames { get; set; } = true;
     }
 
     public class InputJSON

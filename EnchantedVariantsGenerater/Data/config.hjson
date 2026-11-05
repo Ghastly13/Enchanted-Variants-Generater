@@ -7,5 +7,6 @@
 	"OpenWorldLootWeight": 1,
 	"ApplySkyPatcherNames": true,
 	"MatchEnchantmentNames": true,
-	"OverrideRuntimeEnchantmentNames": true
+	"OverrideRuntimeEnchantmentNames": true,
+	"ReconcileRuntimeRenames": true
 }

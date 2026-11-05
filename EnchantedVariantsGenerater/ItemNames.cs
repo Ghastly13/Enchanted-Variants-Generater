@@ -33,15 +33,51 @@ namespace EnchantedVariantsGenerater
         private static Dictionary<FormKey, string> _runtimeNames = new();
         private static Dictionary<FormKey, (string Prefix, string Suffix)> _affixes = new();
 
+        // Runtime renames by source. Paths of Empyrean's SKSE plugin has its own SkyPatcher-syntax reader for
+        // SKSE\Plugins\POE\Weapon; nothing says whether it applies before or after SkyPatcher, so where both rename an
+        // item the two names are merged (see MergeRenames) and written to both, and the merged name wins either way.
+        private static Dictionary<FormKey, string> _poeNames = new();
+        private static Dictionary<FormKey, string> _skyPatcherNames = new();
+        private static HashSet<FormKey> _merged = new();
+
+        private static string PoeWeaponFolder(IPatcherState<ISkyrimMod, ISkyrimModGetter> state) => Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "POE", "Weapon");
+
         public static void Build(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, Config config)
         {
             _runtimeNames = new();
             _affixes = new();
+            _poeNames = new();
+            _skyPatcherNames = new();
+            _merged = new();
 
             if (config.ApplySkyPatcherNames)
             {
-                ReadSkyPatcherNames(state, "weapon", "filterByWeapons", fk => linkCache.TryResolve<IWeaponGetter>(fk, out _), id => linkCache.TryResolve<IWeaponGetter>(id, out var w) ? w.FormKey : null);
-                ReadSkyPatcherNames(state, "armor", "filterByArmors", fk => linkCache.TryResolve<IArmorGetter>(fk, out _), id => linkCache.TryResolve<IArmorGetter>(id, out var a) ? a.FormKey : null);
+                Func<FormKey, bool> weaponExists = fk => linkCache.TryResolve<IWeaponGetter>(fk, out _);
+                Func<string, FormKey?> weaponByEditorID = id => linkCache.TryResolve<IWeaponGetter>(id, out var w) ? w.FormKey : null;
+                string skyPatcher = Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher");
+                ReadRenames(state, PoeWeaponFolder(state), "Paths of Empyrean weapon", "filterByWeapons", weaponExists, weaponByEditorID, _poeNames);
+                ReadRenames(state, Path.Combine(skyPatcher, "weapon"), "SkyPatcher weapon", "filterByWeapons", weaponExists, weaponByEditorID, _skyPatcherNames);
+                ReadRenames(state, Path.Combine(skyPatcher, "armor"), "SkyPatcher armor", "filterByArmors", fk => linkCache.TryResolve<IArmorGetter>(fk, out _), id => linkCache.TryResolve<IArmorGetter>(id, out var a) ? a.FormKey : null, _skyPatcherNames);
+
+                foreach (var (item, name) in _poeNames) _runtimeNames[item] = name;
+                int unmerged = 0;
+                foreach (var (item, skyName) in _skyPatcherNames)
+                {
+                    if (config.ReconcileRuntimeRenames && _poeNames.TryGetValue(item, out var poeName) && linkCache.TryResolve<IWeaponGetter>(item, out var weapon))
+                    {
+                        var merged = MergeRenames(weapon.Name?.String, poeName, skyName);
+                        if (merged == null) unmerged++;
+                        _runtimeNames[item] = merged ?? skyName;
+                        _merged.Add(item);
+                        continue;
+                    }
+                    _runtimeNames[item] = skyName;
+                }
+                if (_merged.Count > 0)
+                {
+                    Console.WriteLine("Renamed by both Paths of Empyrean and SkyPatcher: " + _merged.Count + " items, merged"
+                        + (unmerged > 0 ? " (" + unmerged + " could not be merged; the SkyPatcher name is used)" : ""));
+                }
             }
 
             if (config.MatchEnchantmentNames)
@@ -99,11 +135,15 @@ namespace EnchantedVariantsGenerater
             string skyPatcher = Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher");
             string weaponIni = Path.Combine(skyPatcher, "weapon", OverrideFolder, OverrideFile);
             string armorIni = Path.Combine(skyPatcher, "armor", OverrideFolder, OverrideFile);
+            string poeIni = Path.Combine(PoeWeaponFolder(state), OverrideFile);
 
-            if (!config.OverrideRuntimeEnchantmentNames || !config.MatchEnchantmentNames || !config.ApplySkyPatcherNames || !ThaumaturgyActive(state))
+            bool restoreEnchantmentNames = config.OverrideRuntimeEnchantmentNames && config.MatchEnchantmentNames && config.ApplySkyPatcherNames && ThaumaturgyActive(state);
+            bool reconcile = config.ReconcileRuntimeRenames && config.ApplySkyPatcherNames;
+            if (!restoreEnchantmentNames && !reconcile)
             {
                 DeleteIfPresent(weaponIni);
                 DeleteIfPresent(armorIni);
+                DeleteIfPresent(poeIni);
                 return;
             }
 
@@ -116,29 +156,86 @@ namespace EnchantedVariantsGenerater
                 return wanted == NameOf(variant, pluginName) ? null : wanted;
             }
 
-            var weaponLines = new List<string>();
-            foreach (var weapon in state.LoadOrder.PriorityOrder.Weapon().WinningOverrides())
+            // Weapon names to set: merged names for items both PoE and SkyPatcher rename, and restored enchantment names
+            var weaponNames = new Dictionary<FormKey, string>();
+            int merges = 0, restoredWeapons = 0;
+            if (reconcile)
             {
-                if (weapon.Template.IsNull || weapon.ObjectEffect.IsNull || weapon.FormKey.ModKey == state.PatchMod.ModKey) continue;
-                if (!linkCache.TryResolve<IWeaponGetter>(weapon.Template.FormKey, out var template)) continue;
-                var wanted = Restored(weapon.FormKey, weapon.Name?.String, template.FormKey, template.Name?.String);
-                if (wanted != null) weaponLines.Add("filterByWeapons=" + FormString(weapon.FormKey) + ":fullName=~" + wanted + "~");
+                foreach (var item in _merged)
+                {
+                    weaponNames[item] = _runtimeNames[item];
+                    merges++;
+                }
             }
-            var armorLines = new List<string>();
-            foreach (var armor in state.LoadOrder.PriorityOrder.Armor().WinningOverrides())
+            if (restoreEnchantmentNames)
             {
-                if (armor.TemplateArmor.IsNull || armor.ObjectEffect.IsNull || armor.FormKey.ModKey == state.PatchMod.ModKey) continue;
-                if (!linkCache.TryResolve<IArmorGetter>(armor.TemplateArmor.FormKey, out var template)) continue;
-                var wanted = Restored(armor.FormKey, armor.Name?.String, template.FormKey, template.Name?.String);
-                if (wanted != null) armorLines.Add("filterByArmors=" + FormString(armor.FormKey) + ":fullName=~" + wanted + "~");
+                foreach (var weapon in state.LoadOrder.PriorityOrder.Weapon().WinningOverrides())
+                {
+                    if (weapon.Template.IsNull || weapon.ObjectEffect.IsNull || weapon.FormKey.ModKey == state.PatchMod.ModKey) continue;
+                    if (!linkCache.TryResolve<IWeaponGetter>(weapon.Template.FormKey, out var template)) continue;
+                    var wanted = Restored(weapon.FormKey, weapon.Name?.String, template.FormKey, template.Name?.String);
+                    if (wanted != null) { weaponNames[weapon.FormKey] = wanted; restoredWeapons++; }
+                }
+            }
+
+            // Every name goes to SkyPatcher. Names of items Paths of Empyrean also renames go to its folder too, addressed
+            // by EditorID as its own INIs are, so the name wins whichever of the two applies last.
+            var weaponLines = new List<string>();
+            var poeLines = new List<string>();
+            foreach (var (item, name) in weaponNames)
+            {
+                weaponLines.Add("filterByWeapons=" + FormString(item) + ":fullName=~" + name + "~");
+                if (_poeNames.ContainsKey(item) && linkCache.TryResolve<IWeaponGetter>(item, out var weapon) && !string.IsNullOrEmpty(weapon.EditorID))
+                {
+                    poeLines.Add("filterByWeapons=" + weapon.EditorID + ":fullName=~" + name + "~");
+                }
+            }
+
+            var armorLines = new List<string>();
+            if (restoreEnchantmentNames)
+            {
+                foreach (var armor in state.LoadOrder.PriorityOrder.Armor().WinningOverrides())
+                {
+                    if (armor.TemplateArmor.IsNull || armor.ObjectEffect.IsNull || armor.FormKey.ModKey == state.PatchMod.ModKey) continue;
+                    if (!linkCache.TryResolve<IArmorGetter>(armor.TemplateArmor.FormKey, out var template)) continue;
+                    var wanted = Restored(armor.FormKey, armor.Name?.String, template.FormKey, template.Name?.String);
+                    if (wanted != null) armorLines.Add("filterByArmors=" + FormString(armor.FormKey) + ":fullName=~" + wanted + "~");
+                }
             }
 
             WriteIni(weaponIni, weaponLines);
             WriteIni(armorIni, armorLines);
-            Console.WriteLine("Runtime names: restored Thaumaturgy's enchantment names on " + weaponLines.Count + " weapons and " + armorLines.Count + " armors");
+            WriteIni(poeIni, poeLines);
+            Console.WriteLine("Runtime names: " + merges + " merged item names; restored Thaumaturgy's enchantment names on " + restoredWeapons + " weapons and "
+                + armorLines.Count + " armors; " + poeLines.Count + " lines mirrored for Paths of Empyrean");
         }
 
         private static string FormString(FormKey formKey) => formKey.ModKey.FileName + "|" + formKey.ID.ToString("X6");
+
+        // One item renamed by two mods: carry Paths of Empyrean's word swaps (against the plugin name) over to the
+        // SkyPatcher name. Plugin "Supple Ancient Nord Bow", PoE "Supple Ancient Nord Shortbow" (Bow -> Shortbow),
+        // WACCF "Ancient Nord Supple Bow" -> "Ancient Nord Supple Shortbow". Null when the swaps cannot be carried over.
+        private static string? MergeRenames(string? pluginName, string poeName, string skyName)
+        {
+            if (string.IsNullOrEmpty(pluginName)) return null;
+            if (poeName == pluginName) return skyName;
+            if (skyName == pluginName) return poeName;
+            var plugin = pluginName.Split(' ');
+            var poe = poeName.Split(' ');
+            if (plugin.Length != poe.Length) return null;
+            var result = skyName.Split(' ');
+            var used = new bool[result.Length];
+            for (int i = 0; i < plugin.Length; i++)
+            {
+                if (plugin[i] == poe[i]) continue;
+                int at = Array.FindIndex(result, w => w == plugin[i]);
+                while (at >= 0 && used[at]) at = Array.FindIndex(result, at + 1, w => w == plugin[i]);
+                if (at < 0) return null;
+                result[at] = poe[i];
+                used[at] = true;
+            }
+            return string.Join(' ', result);
+        }
 
         // Prefix/suffix of an enchanted item's name around its base item's name, trying each spelling of the base
         // (plugin name, runtime name): Thaumaturgy's WACCF patch writes "Ancient Nord Honed Sword of Frost" while
@@ -161,8 +258,8 @@ namespace EnchantedVariantsGenerater
             lines.Sort(StringComparer.OrdinalIgnoreCase);
             var text = new StringBuilder();
             text.AppendLine("; Generated by Enchanted Variants Generater on every Synthesis run. Do not edit: the next run replaces this file.");
-            text.AppendLine("; Restores Thaumaturgy's enchantment names on existing enchanted items, keeping other mods' base-item renames.");
-            text.AppendLine("; Sorts after other mods' INIs, so SkyPatcher applies it last.");
+            text.AppendLine("; Sets item names agreed between mods that rename items at runtime (WACCF's SkyPatcher edition, Paths of Empyrean),");
+            text.AppendLine("; with Thaumaturgy's enchantment names on enchanted items. Sorts after the other INIs in its folder, so it applies last.");
             foreach (var line in lines) text.AppendLine(line);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, text.ToString());
@@ -194,13 +291,13 @@ namespace EnchantedVariantsGenerater
             return _runtimeNames.TryGetValue(item, out var renamed) ? renamed : pluginName;
         }
 
-        // Collects fullName= from the SkyPatcher INIs of one record type, the way SkyPatcher loads them: files read in
-        // filename order (a later file wins), a file named after a plugin only when that plugin is active, and hasPlugins /
-        // hasPluginsOr gates honoured. Only lines that pick records by explicit form are applied; lines that pick them
-        // by keyword or other rules are counted and left out, rather than guessed at.
-        private static void ReadSkyPatcherNames(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, string subfolder, string formFilter, Func<FormKey, bool> exists, Func<string, FormKey?> byEditorID)
+        // Collects fullName= from one folder of SkyPatcher-syntax INIs (SkyPatcher's own, or Paths of Empyrean's built-in
+        // reader, which uses the same syntax), the way SkyPatcher loads them: files read in filename order (a later file
+        // wins), a file named after a plugin only when that plugin is active, and hasPlugins / hasPluginsOr gates honoured.
+        // Only lines that pick records by explicit form are applied; lines that pick them by keyword or other rules are
+        // counted and left out, rather than guessed at. This patcher's own output is skipped.
+        private static void ReadRenames(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, string root, string label, string formFilter, Func<FormKey, bool> exists, Func<string, FormKey?> byEditorID, Dictionary<FormKey, string> target)
         {
-            string root = Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher", subfolder);
             if (!Directory.Exists(root)) return;
 
             var active = new HashSet<string>(state.LoadOrder.Where(l => l.Value.Enabled).Select(l => l.Key.FileName.String), StringComparer.OrdinalIgnoreCase);
@@ -213,6 +310,7 @@ namespace EnchantedVariantsGenerater
             {
                 // This patcher's own renames from an earlier run are not the load order's names
                 if (relative.StartsWith(OverrideFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
+                if (Path.GetFileName(full).Equals(OverrideFile, StringComparison.OrdinalIgnoreCase)) continue;
 
                 string gate = Path.GetFileNameWithoutExtension(full);
                 if (gate.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) || gate.EndsWith(".esm", StringComparison.OrdinalIgnoreCase) || gate.EndsWith(".esl", StringComparison.OrdinalIgnoreCase))
@@ -246,12 +344,12 @@ namespace EnchantedVariantsGenerater
                     {
                         var formKey = ResolveForm(token, exists, byEditorID);
                         if (formKey == null) { unresolved++; continue; }
-                        _runtimeNames[formKey.Value] = name;
+                        target[formKey.Value] = name;
                         renamed++;
                     }
                 }
             }
-            Console.WriteLine("SkyPatcher " + subfolder + " names: " + renamed + " renames applied"
+            Console.WriteLine(label + " names: " + renamed + " renames applied"
                 + (unsupported > 0 ? ", " + unsupported + " rename lines skipped (not filtered by explicit forms)" : "")
                 + (unresolved > 0 ? ", " + unresolved + " forms not in the load order" : ""));
         }
