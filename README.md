@@ -1,4 +1,4 @@
-# Enchanted-Variants-Generater
+# Enchanted-Variants-Generator
 
 Patcher for  [Synthesis](https://github.com/Mutagen-Modding/Synthesis) for Skyrim Special Edition\
 Generates Enchanted versions of weapons and armors, along with sublists

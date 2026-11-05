@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Threading;
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Synthesis;
@@ -13,7 +14,7 @@ using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Cache.Internals.Implementations;
 using Mutagen.Bethesda.Plugins.Records;
 
-namespace EnchantedVariantsGenerater
+namespace EnchantedVariantsGenerator
 {
     public class UnsafeThreadStuff
     {
@@ -826,13 +827,40 @@ namespace EnchantedVariantsGenerater
             if (Directory.Exists(Path.Combine(own, "input"))) return own;
 
             string parent = Path.GetDirectoryName(own.TrimEnd('\\', '/')) ?? own;
-            string shared = Path.Combine(parent, "Enchanted-Variants-Generater");
-            if (Directory.Exists(Path.Combine(shared, "input")))
+            // The git patcher's folder, under the corrected spelling and the one it had before
+            foreach (var name in new[] { "Enchanted-Variants-Generator", "Enchanted-Variants-Generater" })
             {
-                Console.WriteLine("No input folder in \"" + own + "\"; using \"" + shared + "\"");
-                return shared;
+                string shared = Path.Combine(parent, name);
+                if (Directory.Exists(Path.Combine(shared, "input")))
+                {
+                    Console.WriteLine("No input folder in \"" + own + "\"; using \"" + shared + "\"");
+                    return shared;
+                }
             }
-            throw new Exception("No input folder found in \"" + own + "\" or \"" + shared + "\"");
+            throw new Exception("No input folder found in \"" + own + "\" or in \"Enchanted-Variants-Generator\" beside it");
+        }
+
+        // Removes a file this patcher wrote under its old misspelled name ("Generater"), and its folder once empty
+        public static void DeleteLegacyOutput(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                    Console.WriteLine("Removed old output " + path);
+                }
+                string? folder = Path.GetDirectoryName(path);
+                if (folder != null && Path.GetFileName(folder).Contains("Generater", StringComparison.OrdinalIgnoreCase)
+                    && Directory.Exists(folder) && !Directory.EnumerateFileSystemEntries(folder).Any())
+                {
+                    Directory.Delete(folder);
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Could not remove old output " + path + ": " + e.Message);
+            }
         }
 
         public static async Task<int> Main(string[] args)

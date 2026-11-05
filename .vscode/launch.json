@@ -10,9 +10,9 @@
             "request": "launch",
             "preLaunchTask": "build",
             // If you have changed target frameworks, make sure to update the program path.
-            "program": "${workspaceFolder}/EnchantedVariantsGenerater/bin/Debug/netcoreapp3.1/EnchantedVariantsGenerater.dll",
+            "program": "${workspaceFolder}/EnchantedVariantsGenerator/bin/Debug/netcoreapp3.1/EnchantedVariantsGenerator.dll",
             "args": [],
-            "cwd": "${workspaceFolder}/EnchantedVariantsGenerater",
+            "cwd": "${workspaceFolder}/EnchantedVariantsGenerator",
             // For more information about the 'console' field, see https://aka.ms/VSCode-CS-LaunchJson-Console
             "console": "internalConsole",
             "stopAtEntry": false
