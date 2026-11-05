@@ -56,14 +56,19 @@ namespace EnchantedVariantsGenerater
             ("WeapTypeBow", "Bow"),
         };
 
+        // True when OWL distributes the generated weapons, so the input files' own weapon leveled lists are not needed.
+        public static bool IsActive(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config)
+        {
+            return config.OpenWorldLootIntegration && state.LoadOrder.ContainsKey(OwlModKey) && state.LoadOrder[OwlModKey].Enabled;
+        }
+
         public static void Run(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, List<GeneratedWeapon> generated)
         {
             string iniPath = Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher", "leveledList", "EnchantedVariantsGenerater", OwlModKey.FileName + ".ini");
 
-            bool owlLoaded = state.LoadOrder.ContainsKey(OwlModKey) && state.LoadOrder[OwlModKey].Enabled;
-            if (!config.OpenWorldLootIntegration || !owlLoaded || generated.Count == 0)
+            if (!IsActive(state, config) || generated.Count == 0)
             {
-                if (config.OpenWorldLootIntegration && !owlLoaded) Console.WriteLine("Open World Loot is not in the load order; skipping OWL integration");
+                if (config.OpenWorldLootIntegration && !IsActive(state, config)) Console.WriteLine("Open World Loot is not in the load order; skipping OWL integration");
                 DeleteIfPresent(iniPath);
                 return;
             }
@@ -81,16 +86,16 @@ namespace EnchantedVariantsGenerater
             var materialKeywords = ResolveKeywords(linkCache, Materials.Select(m => m.Keyword));
             var typeKeywords = ResolveKeywords(linkCache, Types.Select(t => t.Keyword));
 
-            // OWL list EditorID -> (tier index 0..2 -> generated weapons)
-            var targets = new SortedDictionary<string, SortedDictionary<int, List<FormKey>>>(StringComparer.OrdinalIgnoreCase);
+            // OWL list EditorID -> (tier index 0..2 -> generated weapons, each with the plugin its enchantment comes from)
+            var targets = new SortedDictionary<string, SortedDictionary<int, List<(FormKey Weapon, ModKey EnchantmentMod)>>>(StringComparer.OrdinalIgnoreCase);
             var skipped = new Dictionary<string, int>();
             void Skip(string reason) => skipped[reason] = skipped.GetValueOrDefault(reason) + 1;
-            void Add(string target, int tierIndex, FormKey weapon)
+            void Add(string target, int tierIndex, GeneratedWeapon weapon)
             {
                 if (!owlLists.ContainsKey(target)) { Skip("no OWL list " + target); return; }
-                if (!targets.TryGetValue(target, out var tiers)) targets[target] = tiers = new SortedDictionary<int, List<FormKey>>();
-                if (!tiers.TryGetValue(tierIndex, out var list)) tiers[tierIndex] = list = new List<FormKey>();
-                list.Add(weapon);
+                if (!targets.TryGetValue(target, out var tiers)) targets[target] = tiers = new SortedDictionary<int, List<(FormKey, ModKey)>>();
+                if (!tiers.TryGetValue(tierIndex, out var list)) tiers[tierIndex] = list = new List<(FormKey, ModKey)>();
+                list.Add((weapon.FormKey, weapon.Enchantment.Enchantment.FormKey.ModKey));
             }
 
             foreach (var g in generated)
@@ -110,19 +115,22 @@ namespace EnchantedVariantsGenerater
                 {
                     if (!frost.Contains(enchantment)) { Skip("Draugr: OWL only distributes frost enchantments"); continue; }
                     string honed = material.Name == "DraugrHoned" ? "_Honed" : "";
-                    Add("OWL_Weapon_Draugr_" + type + honed + "_Ench_Frost_" + (tierIndex + 1).ToString("00"), 0, g.FormKey);
+                    Add("OWL_Weapon_Draugr_" + type + honed + "_Ench_Frost_" + (tierIndex + 1).ToString("00"), 0, g);
                     continue;
                 }
 
-                Add("OWL_Weapon_" + material.Name + "_" + type + "_Ench", tierIndex, g.FormKey);
+                Add("OWL_Weapon_" + material.Name + "_" + type + "_Ench", tierIndex, g);
                 if (material.Name == "Daedric" && fire.Contains(enchantment))
                 {
-                    Add("OWL_Weapon_Daedric_" + type + "_Ench_Fire", tierIndex, g.FormKey);
+                    Add("OWL_Weapon_Daedric_" + type + "_Ench_Fire", tierIndex, g);
                 }
             }
 
-            // Build one parent sublist per OWL list: one entry per tier (at that material's tier level), each pointing at a
-            // child list of that tier's variants, split into several children if a tier holds more than 255.
+            // Per OWL list:  <OWL list>_EVG          one entry per tier, at that material's tier level
+            //                 -> <OWL list>_EVG_T1     one entry per enchantment mod, repeated in proportion to its size
+            //                    -> <OWL list>_EVG_T1_<Mod>[_2…]   the variants, split into several lists past 255
+            // A leveled list picks evenly between its entries, so the repeats keep every variant in a tier at about the same
+            // odds however the tier divides between mods, and the tier list is unchanged from one entry per tier.
             bool draugrList(string target) => target.StartsWith("OWL_Weapon_Draugr_", StringComparison.OrdinalIgnoreCase);
             var ini = new StringBuilder();
             ini.AppendLine("; Generated by Enchanted Variants Generater on every Synthesis run. Do not edit: the next run replaces this file.");
@@ -137,17 +145,30 @@ namespace EnchantedVariantsGenerater
                     var material = Materials.First(m => target.StartsWith("OWL_Weapon_" + m.Info.Name + "_", StringComparison.OrdinalIgnoreCase)
                         || (draugrList(target) && m.Info.Name == "Draugr")).Info;
                     short level = draugrList(target) ? (short)1 : material.TierLevels[tierIndex];
-                    var chunks = weapons.Chunk(MaxEntriesPerList).ToList();
-                    for (int c = 0; c < chunks.Count; c++)
+                    string tierId = target + SublistSuffix + "_T" + (tierIndex + 1);
+                    var tierList = NewList(state, linkCache, config, tierId);
+                    listCount++;
+
+                    // One weight unit per ~1% of the tier, so the tier list stays far below 255 entries
+                    double unit = Math.Max(1.0, Math.Ceiling(weapons.Count / 100.0));
+                    foreach (var byMod in weapons.GroupBy(w => w.EnchantmentMod).OrderBy(gr => gr.Key.FileName.String, StringComparer.OrdinalIgnoreCase))
                     {
-                        string childId = target + SublistSuffix + "_T" + (tierIndex + 1) + (chunks.Count > 1 ? "_" + (c + 1) : "");
-                        var child = NewList(state, linkCache, config, childId);
-                        listCount++;
-                        foreach (var weapon in chunks[c]) child.Entries!.Add(Program.CreateLeveledItemEntry(1, weapon));
-                        entryCount += chunks[c].Length;
-                        state.PatchMod.LeveledItems.Set(child);
-                        parent.Entries!.Add(Program.CreateLeveledItemEntry(level, child.FormKey));
+                        string modId = tierId + "_" + Regex.Replace(byMod.Key.Name, "[^A-Za-z0-9]", "");
+                        var chunks = byMod.Select(w => w.Weapon).Chunk(MaxEntriesPerList).ToList();
+                        for (int c = 0; c < chunks.Count; c++)
+                        {
+                            var modList = NewList(state, linkCache, config, modId + (chunks.Count > 1 ? "_" + (c + 1) : ""));
+                            listCount++;
+                            foreach (var weapon in chunks[c]) modList.Entries!.Add(Program.CreateLeveledItemEntry(1, weapon));
+                            entryCount += chunks[c].Length;
+                            state.PatchMod.LeveledItems.Set(modList);
+
+                            int weight = Math.Max(1, (int)Math.Round(chunks[c].Length / unit));
+                            for (int w = 0; w < weight; w++) tierList.Entries!.Add(Program.CreateLeveledItemEntry(1, modList.FormKey));
+                        }
                     }
+                    state.PatchMod.LeveledItems.Set(tierList);
+                    parent.Entries!.Add(Program.CreateLeveledItemEntry(level, tierList.FormKey));
                 }
                 state.PatchMod.LeveledItems.Set(parent);
 

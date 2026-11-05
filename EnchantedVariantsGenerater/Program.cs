@@ -450,6 +450,8 @@ namespace EnchantedVariantsGenerater
         public static UnsafeThreadStuff GenerateWeapon(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, InputThing input, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, DuplicateIndex duplicates)
         {
             UnsafeThreadStuff stuff = new();
+            // When Open World Loot distributes the generated weapons, the input files' weapon leveled lists are not needed
+            bool owlDistributes = OwlIntegration.IsActive(state, config);
             foreach (var item in input.Weapons.Values)
             {
                 if (config.VerboseLogging) Console.WriteLine("Processing Weapon: " + item.EditorID);
@@ -473,7 +475,7 @@ namespace EnchantedVariantsGenerater
                     { // An enchanted variant of this item with this enchantment already exists: don't make another
                         duplicates.RecordSkip();
                         if (config.VerboseLogging) Console.WriteLine("Skipping duplicate \"" + enchanted_item_EditorID + "\": already exists as \"" + duplicate.EditorID + "\" (" + duplicate.FormKey + ")");
-                        if (config.AddDuplicatesToLeveledLists)
+                        if (config.AddDuplicatesToLeveledLists && !owlDistributes)
                         {
                             UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, duplicate.FormKey, duplicate.EditorID ?? duplicate.FormKey.ToString());
                         }
@@ -590,7 +592,10 @@ namespace EnchantedVariantsGenerater
                     stuff.GeneratedWeapons.Add(new GeneratedWeapon(enchanted_item.FormKey, itemGetter, enchantmentInfo));
 
                     // Set Leveled Lists
-                    UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, enchanted_item.FormKey, enchanted_item_EditorID);
+                    if (!owlDistributes)
+                    {
+                        UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, enchanted_item.FormKey, enchanted_item_EditorID);
+                    }
                 }
             }
             return stuff;
