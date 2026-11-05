@@ -25,6 +25,17 @@ namespace EnchantedVariantsGenerater
         // How many times each generated sublist is added to its OWL list. OWL picks evenly between a list's
         // entries, so this sets the generated variants' share against the variants already there.
         public int OpenWorldLootWeight { get; set; } = 1;
+
+        // Use the item names SkyPatcher gives at runtime (e.g. WACCF's SkyPatcher edition), not only the plugin names
+        public bool ApplySkyPatcherNames { get; set; } = true;
+
+        // Name each enchantment the way the load order already names it on existing enchanted variants (Thaumaturgy,
+        // WACCF, ...); the input file's Prefix/Suffix is used only for enchantments with no existing variant
+        public bool MatchEnchantmentNames { get; set; } = true;
+
+        // With Thaumaturgy, write SkyPatcher INIs (applied after other mods') that restore Thaumaturgy's enchantment
+        // names on existing enchanted items where another mod's SkyPatcher renames (WACCF's) replace them at runtime
+        public bool OverrideRuntimeEnchantmentNames { get; set; } = true;
     }
 
     public class InputJSON

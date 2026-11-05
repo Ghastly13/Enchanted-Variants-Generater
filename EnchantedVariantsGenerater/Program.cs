@@ -482,7 +482,7 @@ namespace EnchantedVariantsGenerater
                         continue;
                     }
                     var enchanted_item = GetEnchantedWeapon(linkCache, state.PatchMod, enchanted_item_EditorID, config.CheckExistingGenerated, out var EnchantedItemAlreadyExists, enchantmentInfo.Enchantment.ToNullableLink(), itemGetter.ToNullableLink());
-                    var enchanted_item_name = enchantmentInfo.Prefix + itemGetter.Name + enchantmentInfo.Suffix;
+                    var enchanted_item_name = ItemNames.Compose(itemGetter.FormKey, itemGetter.Name?.String, enchantmentInfo);
 
                     if (!EnchantedItemAlreadyExists)
                     { // Create Enchanted Item
@@ -634,7 +634,7 @@ namespace EnchantedVariantsGenerater
                         continue;
                     }
                     var enchanted_item = GetEnchantedArmor(linkCache, state.PatchMod, enchanted_item_EditorID, config.CheckExistingGenerated, out var EnchantedItemAlreadyExists, enchantmentInfo.Enchantment.ToNullableLink(), itemGetter.ToNullableLink());
-                    var enchanted_item_name = enchantmentInfo.Prefix + itemGetter.Name + enchantmentInfo.Suffix;
+                    var enchanted_item_name = ItemNames.Compose(itemGetter.FormKey, itemGetter.Name?.String, enchantmentInfo);
 
                     if (!EnchantedItemAlreadyExists)
                     { // Create Enchanted Item
@@ -852,6 +852,8 @@ namespace EnchantedVariantsGenerater
             List<InputThing> inputs = GetInputs(state, config, dataPath);
 
             var linkcache = state.LoadOrder.ToImmutableLinkCache();
+            ItemNames.Build(state, linkcache, config);
+            ItemNames.WriteRuntimeNameOverrides(state, linkcache, config);
 
             var weaponDuplicates = new DuplicateIndex();
             var armorDuplicates = new DuplicateIndex();

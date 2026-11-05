@@ -4,5 +4,8 @@
 	"SkipDuplicates": true,
 	"AddDuplicatesToLeveledLists": true,
 	"OpenWorldLootIntegration": true,
-	"OpenWorldLootWeight": 1
+	"OpenWorldLootWeight": 1,
+	"ApplySkyPatcherNames": true,
+	"MatchEnchantmentNames": true,
+	"OverrideRuntimeEnchantmentNames": true
 }
