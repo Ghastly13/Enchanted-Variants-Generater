@@ -26,6 +26,11 @@ namespace EnchantedVariantsGenerater
         // entries, so this sets the generated variants' share against the variants already there.
         public int OpenWorldLootWeight { get; set; } = 1;
 
+        // How each tier's variants are laid out under the OWL sublists:
+        //   "Normalized" (default): pooled across enchantment mods into equal lists, every variant at the same odds
+        //   "ByMod" (debugging): one list per enchantment mod, weighted by size, to see what each mod contributes
+        public string OpenWorldLootSublists { get; set; } = "Normalized";
+
         // Use the item names SkyPatcher gives at runtime (e.g. WACCF's SkyPatcher edition), not only the plugin names
         public bool ApplySkyPatcherNames { get; set; } = true;
 
