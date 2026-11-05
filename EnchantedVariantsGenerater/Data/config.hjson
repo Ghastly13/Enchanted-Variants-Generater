@@ -2,5 +2,7 @@
 	"CheckExistingGenerated": true,
 	"VerboseLogging": false,
 	"SkipDuplicates": true,
-	"AddDuplicatesToLeveledLists": true
+	"AddDuplicatesToLeveledLists": true,
+	"OpenWorldLootIntegration": true,
+	"OpenWorldLootWeight": 1
 }

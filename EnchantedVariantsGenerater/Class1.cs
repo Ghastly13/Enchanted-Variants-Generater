@@ -17,6 +17,14 @@ namespace EnchantedVariantsGenerater
         // When a duplicate is skipped, put the existing variant into the generated leveled lists in its place,
         // so the lists stay complete. False leaves the duplicate out of the lists entirely.
         public bool AddDuplicatesToLeveledLists { get; set; } = true;
+
+        // When Open World Loot is in the load order, file generated weapon variants into OWL's enchanted lists:
+        // one sublist per material and weapon type, wired in by a SkyPatcher INI written next to the output.
+        public bool OpenWorldLootIntegration { get; set; } = true;
+
+        // How many times each generated sublist is added to its OWL list. OWL picks evenly between a list's
+        // entries, so this sets the generated variants' share against the variants already there.
+        public int OpenWorldLootWeight { get; set; } = 1;
     }
 
     public class InputJSON

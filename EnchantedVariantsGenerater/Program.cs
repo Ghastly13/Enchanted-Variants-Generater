@@ -20,6 +20,7 @@ namespace EnchantedVariantsGenerater
         public List<Weapon> WeaponsToSet { get; set; } = new();
         public List<Armor> ArmorToSet { get; set; } = new();
         public List<LeveledItem> LeveledListsToSet { get; set; } = new();
+        public List<GeneratedWeapon> GeneratedWeapons { get; set; } = new();
     }
 
     public class LeveledListInfo
@@ -585,6 +586,9 @@ namespace EnchantedVariantsGenerater
                         }
                     }
 
+                    // Only variants this patcher generates; pre-existing duplicates are left to the mod that made them
+                    stuff.GeneratedWeapons.Add(new GeneratedWeapon(enchanted_item.FormKey, itemGetter, enchantmentInfo));
+
                     // Set Leveled Lists
                     UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, enchanted_item.FormKey, enchanted_item_EditorID);
                 }
@@ -882,6 +886,11 @@ namespace EnchantedVariantsGenerater
                     state.PatchMod.LeveledItems.Set(leveledlist);
                 }
             }
+
+            // Runs after all tasks finish, so its records are created on one thread
+            var generatedWeapons = new List<GeneratedWeapon>();
+            foreach (var task in tasks) generatedWeapons.AddRange(task.Result.GeneratedWeapons);
+            OwlIntegration.Run(state, config, linkcache, generatedWeapons);
         } // End of Patching
 
     }
