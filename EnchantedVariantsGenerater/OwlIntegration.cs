@@ -120,9 +120,12 @@ namespace EnchantedVariantsGenerater
                 }
 
                 Add("OWL_Weapon_" + material.Name + "_" + type + "_Ench", tierIndex, g);
-                if (material.Name == "Daedric" && fire.Contains(enchantment))
+                // The fire list is extra: OWL has none for some types (daggers, bows), and those variants
+                // are still distributed through the general list above, so a missing one is not a skip.
+                string fireTarget = "OWL_Weapon_Daedric_" + type + "_Ench_Fire";
+                if (material.Name == "Daedric" && fire.Contains(enchantment) && owlLists.ContainsKey(fireTarget))
                 {
-                    Add("OWL_Weapon_Daedric_" + type + "_Ench_Fire", tierIndex, g);
+                    Add(fireTarget, tierIndex, g);
                 }
             }
 
