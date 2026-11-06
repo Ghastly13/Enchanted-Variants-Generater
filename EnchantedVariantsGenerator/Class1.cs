@@ -59,12 +59,13 @@ namespace EnchantedVariantsGenerator
 
         [SynthesisOrder]
         [SynthesisSettingName("Names: match enchantment names to the load order")]
-        [SynthesisTooltip("Take each enchantment's prefix/suffix from the enchanted items that already exist for it (Thaumaturgy's naming when it is installed). The input file's Prefix/Suffix is used only when none exist.")]
+        [SynthesisTooltip("Take each enchantment's prefix/suffix from the enchanted items that already exist for it: Thaumaturgy's naming when it is installed, else runtime renames (WACCF, Paths of Empyrean), else the most common spelling. The input file's Prefix/Suffix is used only when none exist.")]
         public bool MatchEnchantmentNames { get; set; } = true;
 
+        // JSON key kept from when this only restored Thaumaturgy's names, so existing settings carry over
         [SynthesisOrder]
-        [SynthesisSettingName("Names: restore Thaumaturgy's names on existing items")]
-        [SynthesisTooltip("With Thaumaturgy, write SkyPatcher INIs, applied after other mods', that put Thaumaturgy's enchantment names back where runtime renames (e.g. WACCF's) replace them.")]
+        [SynthesisSettingName("Names: fix names of existing enchanted items")]
+        [SynthesisTooltip("Rename existing enchanted items (vanilla's and other mods') to match: the enchantment's load-order name around the base item's shown name, e.g. \"Ancient Nord Honed Sword of Frost\". Written as SkyPatcher INIs applied after other mods'. Items with unique names are left alone.")]
         public bool OverrideRuntimeEnchantmentNames { get; set; } = true;
 
         [SynthesisOrder]

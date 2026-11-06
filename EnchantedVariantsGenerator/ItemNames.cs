@@ -86,54 +86,80 @@ namespace EnchantedVariantsGenerator
 
             if (config.MatchEnchantmentNames)
             {
-                // With Thaumaturgy, its naming of enchantments wins: affixes are read from the variants' plugin names, which
-                // Thaumaturgy (and its patches) set, ignoring runtime renames such as WACCF's SkyPatcher edition. Without it,
-                // the runtime names are used, so WACCF's naming applies. Item (base) names keep runtime renames either way.
+                // Which existing variants decide an enchantment's name, in order:
+                //   1. The naming authority. With Thaumaturgy: variants whose winning record comes from Thaumaturgy or a plugin
+                //      built on it (its WACCF patch), read by plugin name, so runtime renames such as WACCF's SkyPatcher
+                //      edition do not override it. Without Thaumaturgy: variants renamed at runtime (WACCF, Paths of Empyrean).
+                //   2. Every other variant: the most common spelling, so e.g. Summermyst's own enchantments keep its names.
+                // Without the ranking, a mod with many variants of its own (Heavy Armory) would out-vote the authority.
+                // Item (base) names keep runtime renames either way.
                 bool thaumaturgy = ThaumaturgyActive(state);
+                var thaumaturgyFamily = new HashSet<ModKey> { ThaumaturgyModKey };
+                foreach (var listing in state.LoadOrder.PriorityOrder)
+                {
+                    if (listing.Enabled && listing.Mod != null && listing.Mod.ModHeader.MasterReferences.Any(m => m.Master == ThaumaturgyModKey))
+                    {
+                        thaumaturgyFamily.Add(listing.ModKey);
+                    }
+                }
                 Func<FormKey, string?, string?> affixName = thaumaturgy ? (_, pluginName) => pluginName : NameOf;
+                bool IsAuthority(FormKey variant, ModKey winningPlugin) =>
+                    thaumaturgy ? thaumaturgyFamily.Contains(winningPlugin) : _runtimeNames.ContainsKey(variant);
 
-                var tally = new Dictionary<FormKey, Dictionary<(string, string), int>>();
-                void Count(FormKey enchantment, string? name, string? baseName, string? baseRuntimeName)
+                var tallies = new[] { new Dictionary<FormKey, Dictionary<(string, string), int>>(), new Dictionary<FormKey, Dictionary<(string, string), int>>() };
+                int authorityVariants = 0;
+                void Count(bool authority, FormKey enchantment, string? name, string? baseName, string? baseRuntimeName)
                 {
                     var split = SplitAffix(name, baseName, baseRuntimeName);
                     if (split == null) return; // a unique name ("Wraith Sword") says nothing about the enchantment's affix
+                    var tally = tallies[authority ? 0 : 1];
                     var affix = (split.Value.Prefix, split.Value.Suffix);
                     if (!tally.TryGetValue(enchantment, out var counts)) tally[enchantment] = counts = new();
                     counts[affix] = counts.GetValueOrDefault(affix) + 1;
+                    if (authority) authorityVariants++;
                 }
 
-                foreach (var weapon in state.LoadOrder.PriorityOrder.Weapon().WinningOverrides())
+                foreach (var context in state.LoadOrder.PriorityOrder.Weapon().WinningContextOverrides())
                 {
+                    var weapon = context.Record;
                     if (weapon.Template.IsNull || weapon.ObjectEffect.IsNull || weapon.FormKey.ModKey == state.PatchMod.ModKey) continue;
                     if (weapon.Data != null && weapon.Data.Flags.HasFlag(WeaponData.Flag.NonPlayable)) continue;
                     if (!linkCache.TryResolve<IWeaponGetter>(weapon.Template.FormKey, out var template)) continue;
-                    Count(weapon.ObjectEffect.FormKey, affixName(weapon.FormKey, weapon.Name?.String), affixName(template.FormKey, template.Name?.String), NameOf(template.FormKey, template.Name?.String));
+                    Count(IsAuthority(weapon.FormKey, context.ModKey), weapon.ObjectEffect.FormKey, affixName(weapon.FormKey, weapon.Name?.String), affixName(template.FormKey, template.Name?.String), NameOf(template.FormKey, template.Name?.String));
                 }
-                foreach (var armor in state.LoadOrder.PriorityOrder.Armor().WinningOverrides())
+                foreach (var context in state.LoadOrder.PriorityOrder.Armor().WinningContextOverrides())
                 {
+                    var armor = context.Record;
                     if (armor.TemplateArmor.IsNull || armor.ObjectEffect.IsNull || armor.FormKey.ModKey == state.PatchMod.ModKey) continue;
                     if (armor.MajorFlags.HasFlag(Armor.MajorFlag.NonPlayable)) continue;
                     if (!linkCache.TryResolve<IArmorGetter>(armor.TemplateArmor.FormKey, out var template)) continue;
-                    Count(armor.ObjectEffect.FormKey, affixName(armor.FormKey, armor.Name?.String), affixName(template.FormKey, template.Name?.String), NameOf(template.FormKey, template.Name?.String));
+                    Count(IsAuthority(armor.FormKey, context.ModKey), armor.ObjectEffect.FormKey, affixName(armor.FormKey, armor.Name?.String), affixName(template.FormKey, template.Name?.String), NameOf(template.FormKey, template.Name?.String));
                 }
 
-                // Most common affix wins; ties go to the suffix-only form, then alphabetical, so the result is stable
-                foreach (var (enchantment, counts) in tally)
+                // The authority's spelling when it has one, else everyone's; most common wins, ties go to the suffix-only
+                // form, then alphabetical, so the result is stable
+                int fromAuthority = 0;
+                foreach (var enchantment in tallies[0].Keys.Concat(tallies[1].Keys).Distinct())
                 {
-                    _affixes[enchantment] = counts.OrderByDescending(c => c.Value)
+                    bool authority = tallies[0].TryGetValue(enchantment, out var counts);
+                    if (!authority) counts = tallies[1][enchantment];
+                    if (authority) fromAuthority++;
+                    _affixes[enchantment] = counts!.OrderByDescending(c => c.Value)
                         .ThenBy(c => c.Key.Item1.Length)
                         .ThenBy(c => c.Key.Item1 + "|" + c.Key.Item2, StringComparer.Ordinal)
                         .First().Key;
                 }
-                Console.WriteLine("Enchantment names: found the load order's prefix/suffix for " + _affixes.Count + " enchantments"
-                    + (thaumaturgy ? " (Thaumaturgy's naming; runtime renames ignored for enchantment names)" : " (including SkyPatcher runtime renames)"));
+                Console.WriteLine("Enchantment names: " + _affixes.Count + " enchantments named, " + fromAuthority + " of them by "
+                    + (thaumaturgy ? "Thaumaturgy (" + thaumaturgyFamily.Count + " plugins)" : "runtime renames (WACCF, Paths of Empyrean)")
+                    + " from " + authorityVariants + " variants; the rest by the most common spelling");
             }
         }
 
-        // With Thaumaturgy, other mods' SkyPatcher renames (WACCF's) replace its enchantment names on the existing
-        // enchanted variants at runtime. Write SkyPatcher INIs, applied after theirs, that put Thaumaturgy's prefix/suffix
-        // back while keeping the runtime base name ("Ancient Nord Honed Sword of Frost"). Only variants whose shown name
-        // would change get a line. The INIs are rewritten every run and removed when they no longer apply.
+        // Names every existing enchanted item the way generated ones are named: the enchantment's load-order name (the
+        // naming authority's, see Build: Thaumaturgy when installed) around the base item's shown name, which keeps base
+        // renames such as WACCF's "Ancient Nord Honed Sword of Frost". Written as SkyPatcher INIs applied after other
+        // mods' (and mirrored for Paths of Empyrean), with a line only where the shown name would change. The INIs are
+        // rewritten every run and removed when they no longer apply.
         public static void WriteRuntimeNameOverrides(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, Config config)
         {
             string skyPatcher = Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher");
@@ -146,7 +172,7 @@ namespace EnchantedVariantsGenerator
             Program.DeleteLegacyOutput(Path.Combine(skyPatcher, "armor", LegacyOverrideFolder, LegacyOverrideFile));
             Program.DeleteLegacyOutput(Path.Combine(PoeWeaponFolder(state), LegacyOverrideFile));
 
-            bool restoreEnchantmentNames = config.OverrideRuntimeEnchantmentNames && config.MatchEnchantmentNames && config.ApplySkyPatcherNames && ThaumaturgyActive(state);
+            bool restoreEnchantmentNames = config.OverrideRuntimeEnchantmentNames && config.MatchEnchantmentNames;
             bool reconcile = config.ReconcileRuntimeRenames && config.ApplySkyPatcherNames;
             if (!restoreEnchantmentNames && !reconcile)
             {
@@ -156,12 +182,14 @@ namespace EnchantedVariantsGenerator
                 return;
             }
 
-            // Thaumaturgy's affix from a variant's plugin name, around the base's shown (runtime) name; null if unchanged
-            string? Restored(FormKey variant, string? pluginName, FormKey baseItem, string? basePluginName)
+            // The enchantment's load-order name (see Build) around the base's shown (runtime) name; null if unchanged.
+            // An item whose own name does not contain its base's name ("Wraith Sword") is a unique name and is left alone.
+            string? Restored(FormKey variant, string? pluginName, FormKey enchantment, FormKey baseItem, string? basePluginName)
             {
-                var affix = SplitAffix(pluginName, basePluginName, NameOf(baseItem, basePluginName));
-                if (affix == null) return null;
-                string wanted = affix.Value.Prefix + NameOf(baseItem, basePluginName) + affix.Value.Suffix;
+                var own = SplitAffix(pluginName, basePluginName, NameOf(baseItem, basePluginName));
+                if (own == null) return null;
+                var affix = _affixes.TryGetValue(enchantment, out var named) ? named : own.Value;
+                string wanted = affix.Prefix + NameOf(baseItem, basePluginName) + affix.Suffix;
                 return wanted == NameOf(variant, pluginName) ? null : wanted;
             }
 
@@ -182,7 +210,7 @@ namespace EnchantedVariantsGenerator
                 {
                     if (weapon.Template.IsNull || weapon.ObjectEffect.IsNull || weapon.FormKey.ModKey == state.PatchMod.ModKey) continue;
                     if (!linkCache.TryResolve<IWeaponGetter>(weapon.Template.FormKey, out var template)) continue;
-                    var wanted = Restored(weapon.FormKey, weapon.Name?.String, template.FormKey, template.Name?.String);
+                    var wanted = Restored(weapon.FormKey, weapon.Name?.String, weapon.ObjectEffect.FormKey, template.FormKey, template.Name?.String);
                     if (wanted != null) { weaponNames[weapon.FormKey] = wanted; restoredWeapons++; }
                 }
             }
@@ -207,7 +235,7 @@ namespace EnchantedVariantsGenerator
                 {
                     if (armor.TemplateArmor.IsNull || armor.ObjectEffect.IsNull || armor.FormKey.ModKey == state.PatchMod.ModKey) continue;
                     if (!linkCache.TryResolve<IArmorGetter>(armor.TemplateArmor.FormKey, out var template)) continue;
-                    var wanted = Restored(armor.FormKey, armor.Name?.String, template.FormKey, template.Name?.String);
+                    var wanted = Restored(armor.FormKey, armor.Name?.String, armor.ObjectEffect.FormKey, template.FormKey, template.Name?.String);
                     if (wanted != null) armorLines.Add("filterByArmors=" + FormString(armor.FormKey) + ":fullName=~" + wanted + "~");
                 }
             }
@@ -215,7 +243,7 @@ namespace EnchantedVariantsGenerator
             WriteIni(weaponIni, weaponLines);
             WriteIni(armorIni, armorLines);
             WriteIni(poeIni, poeLines);
-            Console.WriteLine("Runtime names: " + merges + " merged item names; restored Thaumaturgy's enchantment names on " + restoredWeapons + " weapons and "
+            Console.WriteLine("Runtime names: " + merges + " merged item names; renamed " + restoredWeapons + " existing enchanted weapons and "
                 + armorLines.Count + " armors; " + poeLines.Count + " lines mirrored for Paths of Empyrean");
         }
 
