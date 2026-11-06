@@ -921,7 +921,7 @@ namespace EnchantedVariantsGenerator
                 Console.WriteLine("Checking for duplicates against " + weaponDuplicates.Count + " existing enchanted weapons and " + armorDuplicates.Count + " existing enchanted armors");
             }
 
-            AssetIndex.Build(state, config);
+            AssetIndex.Build(state);
 
             Console.WriteLine("Running Generator");
             List<Task<UnsafeThreadStuff>> tasks = new();

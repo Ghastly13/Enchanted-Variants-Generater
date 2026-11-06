@@ -38,11 +38,6 @@ namespace EnchantedVariantsGenerator
         public bool AddDuplicatesToLeveledLists { get; set; } = true;
 
         [SynthesisOrder]
-        [SynthesisSettingName("Skip items whose model is missing")]
-        [SynthesisTooltip("Don't generate variants of a base item whose model file is in no loaded archive or loose folder. Such records are usually unused or unfinished, and their variants would be invisible in game.")]
-        public bool SkipMissingModels { get; set; } = true;
-
-        [SynthesisOrder]
         [SynthesisSettingName("Open World Loot: distribute weapons")]
         [SynthesisTooltip("When Open World Loot is loaded, file generated weapons into its enchanted lists by material, weapon type and tier, through a SkyPatcher INI written beside the output. Weapons then skip the input files' own leveled lists.")]
         public bool OpenWorldLootIntegration { get; set; } = true;

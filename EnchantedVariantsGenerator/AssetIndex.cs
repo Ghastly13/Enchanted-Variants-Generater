@@ -18,13 +18,10 @@ namespace EnchantedVariantsGenerator
         private static string _dataPath = "";
         private static HashSet<string> _archived = new(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, string> _missing = new(StringComparer.OrdinalIgnoreCase);
-        private static bool _enabled;
 
-        public static void Build(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config)
+        public static void Build(IPatcherState<ISkyrimMod, ISkyrimModGetter> state)
         {
-            _enabled = config.SkipMissingModels;
             _missing.Clear();
-            if (!_enabled) return;
             _dataPath = state.DataFolderPath.Path;
             var archived = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int archives = 0;
@@ -60,10 +57,10 @@ namespace EnchantedVariantsGenerator
             return _archived.Contains(p) || File.Exists(Path.Combine(_dataPath, p));
         }
 
-        // False (and noted for the summary) when the check is on and the weapon's model file is missing
+        // False (and noted for the summary) when the weapon's model file is missing
         public static bool HasModel(IWeaponGetter weapon)
         {
-            if (!_enabled || MeshExists(weapon.Model?.File)) return true;
+            if (MeshExists(weapon.Model?.File)) return true;
             _missing.TryAdd(weapon.EditorID ?? weapon.FormKey.ToString(), weapon.Model?.File ?? "(no model)");
             return false;
         }
@@ -71,7 +68,6 @@ namespace EnchantedVariantsGenerator
         // An armor counts as having a model when either of its world models' files exists
         public static bool HasModel(IArmorGetter armor)
         {
-            if (!_enabled) return true;
             var male = armor.WorldModel?.Male?.Model?.File;
             var female = armor.WorldModel?.Female?.Model?.File;
             if (MeshExists(male) || MeshExists(female)) return true;
