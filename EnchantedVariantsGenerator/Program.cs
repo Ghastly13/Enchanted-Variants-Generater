@@ -491,6 +491,7 @@ namespace EnchantedVariantsGenerator
                 {
                     throw new Exception("Could not find Weapon:" + item.EditorID + " : " + item.FormKey);
                 }
+                if (!AssetIndex.HasModel(itemGetter)) continue;
 
                 Dictionary<string, LeveledItem> leveledlists = new();
 
@@ -643,6 +644,7 @@ namespace EnchantedVariantsGenerator
                 {
                     throw new Exception("Could not find Armor:" + item.EditorID + " : " + item.FormKey);
                 }
+                if (!AssetIndex.HasModel(itemGetter)) continue;
 
                 Dictionary<string, LeveledItem> leveledlists = new();
 
@@ -919,6 +921,8 @@ namespace EnchantedVariantsGenerator
                 Console.WriteLine("Checking for duplicates against " + weaponDuplicates.Count + " existing enchanted weapons and " + armorDuplicates.Count + " existing enchanted armors");
             }
 
+            AssetIndex.Build(state, config);
+
             Console.WriteLine("Running Generator");
             List<Task<UnsafeThreadStuff>> tasks = new();
             foreach (var input in inputs)
@@ -927,6 +931,7 @@ namespace EnchantedVariantsGenerator
                 tasks.Add(Task<UnsafeThreadStuff>.Factory.StartNew(() => GenerateWeapon(state, config, input, linkcache, weaponDuplicates)));
             }
             Task.WaitAll(tasks.ToArray());
+            AssetIndex.Report();
             if (config.SkipDuplicates)
             {
                 Console.WriteLine("Skipped " + weaponDuplicates.Skipped + " weapons and " + armorDuplicates.Skipped + " armors that already had an enchanted variant"
