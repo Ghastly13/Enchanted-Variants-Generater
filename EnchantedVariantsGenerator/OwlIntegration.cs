@@ -76,12 +76,15 @@ namespace EnchantedVariantsGenerator
                 return;
             }
 
-            // OWL's own lists, by EditorID (case-insensitive: OWL's INIs mix "GreatSword" and "Greatsword")
+            // OWL's lists and its patches' (OWL_...), by EditorID (case-insensitive: OWL's INIs mix "GreatSword" and "Greatsword")
             var owlLists = new Dictionary<string, FormKey>(StringComparer.OrdinalIgnoreCase);
             foreach (var list in state.LoadOrder.PriorityOrder.LeveledItem().WinningOverrides())
             {
-                if (list.FormKey.ModKey == OwlModKey && list.EditorID != null) owlLists[list.EditorID] = list.FormKey;
+                if (list.EditorID == null) continue;
+                if (list.FormKey.ModKey == OwlModKey || list.EditorID.StartsWith("OWL_", StringComparison.OrdinalIgnoreCase)) owlLists[list.EditorID] = list.FormKey;
             }
+            var patches = PatchLists.Discover(state, linkCache, owlLists);
+            patches.Report(config);
 
             var enchantments = generated.Select(g => g.Enchantment.Enchantment).DistinctBy(e => e.FormKey).ToList();
             var fire = ElementEnchantments(state, linkCache, enchantments, "MagicDamageFire", "Fire");
@@ -91,44 +94,72 @@ namespace EnchantedVariantsGenerator
 
             // OWL list EditorID -> (tier index 0..2 -> generated weapons, each with the plugin its enchantment comes from)
             var targets = new SortedDictionary<string, SortedDictionary<int, List<(FormKey Weapon, ModKey EnchantmentMod)>>>(StringComparer.OrdinalIgnoreCase);
+            var targetMaterial = new Dictionary<string, MaterialInfo>(StringComparer.OrdinalIgnoreCase);
             var skipped = new Dictionary<string, int>();
+            int routedByPatch = 0;
+            var unpatchedBases = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             void Skip(string reason) => skipped[reason] = skipped.GetValueOrDefault(reason) + 1;
-            void Add(string target, int tierIndex, GeneratedWeapon weapon)
+            void Add(string target, int tierIndex, GeneratedWeapon weapon, MaterialInfo material)
             {
                 if (!owlLists.ContainsKey(target)) { Skip("no OWL list " + target); return; }
                 if (!targets.TryGetValue(target, out var tiers)) targets[target] = tiers = new SortedDictionary<int, List<(FormKey, ModKey)>>();
                 if (!tiers.TryGetValue(tierIndex, out var list)) tiers[tierIndex] = list = new List<(FormKey, ModKey)>();
                 list.Add((weapon.FormKey, weapon.Enchantment.Enchantment.FormKey.ModKey));
+                targetMaterial.TryAdd(target, material);
             }
 
+            bool usePatches = config.OpenWorldLootUsePatchLists;
             foreach (var g in generated)
             {
+                var baseKey = g.BaseItem.FormKey;
+                if (config.OpenWorldLootSkipUnpatchedWeapons && patches.CoveringPatch(baseKey) is string patch)
+                {
+                    Skip("not distributed by " + patch);
+                    unpatchedBases.Add(g.BaseItem.EditorID ?? baseKey.ToString());
+                    continue;
+                }
+
                 var keywords = g.BaseItem.Keywords?.Select(k => k.FormKey).ToHashSet() ?? new HashSet<FormKey>();
-                var material = Materials.FirstOrDefault(m => materialKeywords.TryGetValue(m.Keyword, out var fk) && keywords.Contains(fk)).Info;
+                // An OWL patch's list names the material it files the weapon under; keywords are the fallback
+                var routedMaterial = usePatches ? patches.AnyRoute(baseKey) is string anyRoute ? MaterialOfList(anyRoute) : null : null;
+                var material = routedMaterial ?? Materials.FirstOrDefault(m => materialKeywords.TryGetValue(m.Keyword, out var fk) && keywords.Contains(fk)).Info;
                 var type = Types.FirstOrDefault(t => typeKeywords.TryGetValue(t.Keyword, out var fk) && keywords.Contains(fk)).Type;
                 if (material == null) { Skip("base weapon has no OWL material"); continue; }
-                if (type == null) { Skip("base weapon has no OWL weapon type"); continue; }
 
                 int? tier = TierOf(g.Enchantment);
                 if (tier == null) { Skip("enchantment tier unknown"); continue; }
                 int tierIndex = Math.Clamp(tier.Value - material.FirstTier, 0, 2);
                 var enchantment = g.Enchantment.Enchantment.FormKey;
+                string? Route(string slot) => usePatches ? patches.Route(baseKey, slot) : null;
 
                 if (material.Name.StartsWith("Draugr"))
                 {
                     if (!frost.Contains(enchantment)) { Skip("Draugr: OWL only distributes frost enchantments"); continue; }
-                    string honed = material.Name == "DraugrHoned" ? "_Honed" : "";
-                    Add("OWL_Weapon_Draugr_" + type + honed + "_Ench_Frost_" + (tierIndex + 1).ToString("00"), 0, g);
+                    int frostTier = tierIndex + 1;
+                    string? frostTarget = Route("Frost" + frostTier);
+                    if (frostTarget != null) routedByPatch++;
+                    else if (type != null)
+                    {
+                        bool honed = keywords.Contains(materialKeywords.GetValueOrDefault("WeapMaterialDraugrHoned"));
+                        frostTarget = "OWL_Weapon_Draugr_" + type + (honed ? "_Honed" : "") + "_Ench_Frost_" + frostTier.ToString("00");
+                    }
+                    if (frostTarget == null) { Skip("base weapon has no OWL weapon type"); continue; }
+                    Add(frostTarget, 0, g, material);
                     continue;
                 }
 
-                Add("OWL_Weapon_" + material.Name + "_" + type + "_Ench", tierIndex, g);
+                string? target = Route("General");
+                if (target != null) routedByPatch++;
+                else if (type != null) target = "OWL_Weapon_" + material.Name + "_" + type + "_Ench";
+                if (target == null) { Skip("base weapon has no OWL weapon type"); continue; }
+                Add(target, tierIndex, g, material);
+
                 // The fire list is extra: OWL has none for some types (daggers, bows), and those variants
                 // are still distributed through the general list above, so a missing one is not a skip.
-                string fireTarget = "OWL_Weapon_Daedric_" + type + "_Ench_Fire";
-                if (material.Name == "Daedric" && fire.Contains(enchantment) && owlLists.ContainsKey(fireTarget))
+                if (material.Name == "Daedric" && fire.Contains(enchantment))
                 {
-                    Add(fireTarget, tierIndex, g);
+                    string? fireTarget = Route("Fire") ?? (type != null ? "OWL_Weapon_Daedric_" + type + "_Ench_Fire" : null);
+                    if (fireTarget != null && owlLists.ContainsKey(fireTarget)) Add(fireTarget, tierIndex, g, material);
                 }
             }
 
@@ -150,11 +181,11 @@ namespace EnchantedVariantsGenerator
             {
                 var parent = NewList(state, linkCache, config, target + SublistSuffix);
                 listCount++;
+                var material = targetMaterial[target];
+                short LevelOf(int tierIndex) => draugrList(target) ? (short)1 : material.TierLevels[tierIndex];
                 foreach (var (tierIndex, weapons) in tiers)
                 {
-                    var material = Materials.First(m => target.StartsWith("OWL_Weapon_" + m.Info.Name + "_", StringComparison.OrdinalIgnoreCase)
-                        || (draugrList(target) && m.Info.Name == "Draugr")).Info;
-                    short level = draugrList(target) ? (short)1 : material.TierLevels[tierIndex];
+                    short level = LevelOf(tierIndex);
                     string tierId = target + SublistSuffix + "_T" + (tierIndex + 1);
                     var tierList = NewList(state, linkCache, config, tierId);
                     listCount++;
@@ -213,22 +244,45 @@ namespace EnchantedVariantsGenerator
                 }
                 state.PatchMod.LeveledItems.Set(parent);
 
+                // Entered at its lowest tier's level: below that the parent would be picked and give nothing
                 var owlList = owlLists[target];
-                string entry = state.PatchMod.ModKey.FileName + "|" + parent.FormKey.ID.ToString("X6") + "~1~1";
-                string op = config.OpenWorldLootWeight <= 1
+                string entry = state.PatchMod.ModKey.FileName + "|" + parent.FormKey.ID.ToString("X6") + "~" + LevelOf(tiers.Keys.Min()) + "~1";
+                int repeat = config.OpenWorldLootWeight;
+                string note = "";
+                if (patches.IsPatchList(target))
+                {
+                    // An OWL patch's list picks evenly between its variants: one entry per generated variant gives each the
+                    // same odds as the patch's own, as far as the list's 255 entries allow
+                    int generatedCount = tiers.Values.Sum(t => t.Count);
+                    int room = MaxEntriesPerList - patches.EntryCount(target);
+                    repeat = Math.Max(1, Math.Min(generatedCount, room));
+                    note = " (OWL patch list: " + patches.EntryCount(target) + " existing entries, " + generatedCount + " generated, weight " + repeat + ")";
+                }
+                string op = repeat <= 1
                     ? "addOnceToLLs=" + entry
-                    : "addToLLs=" + string.Join(", ", Enumerable.Repeat(entry, config.OpenWorldLootWeight));
-                ini.AppendLine("; " + target);
-                ini.AppendLine("filterByLLs=" + OwlModKey.FileName + "|" + owlList.ID.ToString("X6") + ":" + op);
+                    : "addToLLs=" + string.Join(", ", Enumerable.Repeat(entry, repeat));
+                ini.AppendLine("; " + target + note);
+                ini.AppendLine("filterByLLs=" + owlList.ModKey.FileName + "|" + owlList.ID.ToString("X6") + ":" + op);
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(iniPath)!);
             File.WriteAllText(iniPath, ini.ToString());
-            Console.WriteLine("Open World Loot: filed " + entryCount + " generated weapons into " + listCount + " leveled lists for " + targets.Count + " OWL lists; wrote " + iniPath);
+            Console.WriteLine("Open World Loot: filed " + entryCount + " generated weapons into " + listCount + " leveled lists for " + targets.Count + " OWL lists ("
+                + routedByPatch + " placed by OWL patches' lists); wrote " + iniPath);
             foreach (var (reason, count) in skipped.OrderByDescending(s => s.Value))
             {
                 Console.WriteLine("Open World Loot: skipped " + count + " (" + reason + ")");
             }
+            if (unpatchedBases.Count > 0)
+            {
+                Console.WriteLine("Open World Loot: base weapons left out because their OWL patch never distributes them: " + string.Join(", ", unpatchedBases));
+            }
+        }
+
+        // OWL material named by a list's EditorID, "OWL_Weapon_<Material>_..." (Draugr lists name honed weapons later on)
+        private static MaterialInfo? MaterialOfList(string listEditorID)
+        {
+            return Materials.Select(m => m.Info).FirstOrDefault(m => listEditorID.StartsWith("OWL_Weapon_" + m.Name + "_", StringComparison.OrdinalIgnoreCase));
         }
 
         // The fewest lists of at most 255 that hold the items, dealt round-robin so their sizes differ by at most one

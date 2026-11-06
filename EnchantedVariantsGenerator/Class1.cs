@@ -44,13 +44,23 @@ namespace EnchantedVariantsGenerator
 
         [SynthesisOrder]
         [SynthesisSettingName("Open World Loot: weight")]
-        [SynthesisTooltip("How many times each generated sublist is added to its OWL list. OWL picks evenly between a list's entries, so this sets the generated variants' share against the ones already there.")]
+        [SynthesisTooltip("How many times each generated sublist is added to its OWL list. OWL picks evenly between a list's entries, so this sets the generated variants' share against the ones already there. Lists of OWL patches are weighted automatically instead (see below).")]
         public int OpenWorldLootWeight { get; set; } = 1;
 
         [SynthesisOrder]
         [SynthesisSettingName("Open World Loot: sublist layout")]
         [SynthesisTooltip("Normalized: each tier pooled into the fewest equal lists, every variant at the same odds. ByMod: one list per enchantment mod, weighted by size, for checking what each mod contributes.")]
         public SublistMode OpenWorldLootSublists { get; set; } = SublistMode.Normalized;
+
+        [SynthesisOrder]
+        [SynthesisSettingName("Open World Loot: use OWL patches' lists")]
+        [SynthesisTooltip("When an OWL patch (e.g. Open World Loot - Heavy Armory Patch) already lists a weapon's enchanted variants, file the generated variants into that same list instead of choosing one by keywords. Follows the patch's own choices, such as hatchets in the dagger lists. The generated variants are weighted to match the list's existing variants one for one, as far as the 255-entry limit allows.")]
+        public bool OpenWorldLootUsePatchLists { get; set; } = true;
+
+        [SynthesisOrder]
+        [SynthesisSettingName("Open World Loot: skip weapons an OWL patch leaves out")]
+        [SynthesisTooltip("When an OWL patch covers a weapon mod, generate no OWL loot for that mod's weapons the patch never distributes: usually test, unique or unused records.")]
+        public bool OpenWorldLootSkipUnpatchedWeapons { get; set; } = true;
 
         [SynthesisOrder]
         [SynthesisSettingName("Names: use SkyPatcher and Paths of Empyrean renames")]

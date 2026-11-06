@@ -394,7 +394,7 @@ namespace EnchantedVariantsGenerator
         }
 
         // "Plugin.esp|FormID" (load-order byte ignored, light plugins by their low 12 bits) or an EditorID
-        private static FormKey? ResolveForm(string token, Func<FormKey, bool> exists, Func<string, FormKey?> byEditorID)
+        internal static FormKey? ResolveForm(string token, Func<FormKey, bool> exists, Func<string, FormKey?> byEditorID)
         {
             int bar = token.IndexOf('|');
             if (bar < 0) return byEditorID(token);
@@ -414,7 +414,7 @@ namespace EnchantedVariantsGenerator
         }
 
         // A patch line's ':'-separated segments, with '~...~' values kept whole and a ';' comment dropped
-        private static List<string> SplitSegments(string line)
+        internal static List<string> SplitSegments(string line)
         {
             var segments = new List<string>();
             var current = new StringBuilder();
