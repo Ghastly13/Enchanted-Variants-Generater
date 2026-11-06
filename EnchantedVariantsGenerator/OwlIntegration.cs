@@ -76,13 +76,7 @@ namespace EnchantedVariantsGenerator
                 return;
             }
 
-            // OWL's lists and its patches' (OWL_...), by EditorID (case-insensitive: OWL's INIs mix "GreatSword" and "Greatsword")
-            var owlLists = new Dictionary<string, FormKey>(StringComparer.OrdinalIgnoreCase);
-            foreach (var list in state.LoadOrder.PriorityOrder.LeveledItem().WinningOverrides())
-            {
-                if (list.EditorID == null) continue;
-                if (list.FormKey.ModKey == OwlModKey || list.EditorID.StartsWith("OWL_", StringComparison.OrdinalIgnoreCase)) owlLists[list.EditorID] = list.FormKey;
-            }
+            var owlLists = OwlLists(state);
             var patches = PatchLists.Discover(state, linkCache, owlLists);
             patches.Report(config);
 
@@ -276,6 +270,52 @@ namespace EnchantedVariantsGenerator
             if (unpatchedBases.Count > 0)
             {
                 Console.WriteLine("Open World Loot: base weapons left out because their OWL patch never distributes them: " + string.Join(", ", unpatchedBases));
+            }
+        }
+
+        // OWL's lists and its patches' (OWL_...), by EditorID (case-insensitive: OWL's INIs mix "GreatSword" and "Greatsword")
+        public static Dictionary<string, FormKey> OwlLists(IPatcherState<ISkyrimMod, ISkyrimModGetter> state)
+        {
+            var owlLists = new Dictionary<string, FormKey>(StringComparer.OrdinalIgnoreCase);
+            foreach (var list in state.LoadOrder.PriorityOrder.LeveledItem().WinningOverrides())
+            {
+                if (list.EditorID == null) continue;
+                if (list.FormKey.ModKey == OwlModKey || list.EditorID.StartsWith("OWL_", StringComparison.OrdinalIgnoreCase)) owlLists[list.EditorID] = list.FormKey;
+            }
+            return owlLists;
+        }
+
+        // Whether Run could file a base weapon's variants into an OWL list, by the same rules; null when it could, else why not.
+        // For item discovery, which should add no weapon whose variants would never be distributed.
+        public class Placement
+        {
+            private readonly Config _config;
+            private readonly Dictionary<string, FormKey> _owlLists;
+            private readonly PatchLists _patches;
+            private readonly Dictionary<string, FormKey> _materialKeywords, _typeKeywords;
+
+            public Placement(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache)
+            {
+                _config = config;
+                _owlLists = OwlLists(state);
+                _patches = PatchLists.Discover(state, linkCache, _owlLists);
+                _materialKeywords = ResolveKeywords(linkCache, Materials.Select(m => m.Keyword));
+                _typeKeywords = ResolveKeywords(linkCache, Types.Select(t => t.Keyword));
+            }
+
+            public string? Problem(IWeaponGetter weapon)
+            {
+                if (_config.OpenWorldLootSkipUnpatchedWeapons && _patches.CoveringPatch(weapon.FormKey) is string patch) return "its OWL patch (" + patch + ") does not distribute it";
+                if (_config.OpenWorldLootUsePatchLists && _patches.AnyRoute(weapon.FormKey) != null) return null;
+                var keywords = weapon.Keywords?.Select(k => k.FormKey).ToHashSet() ?? new HashSet<FormKey>();
+                var material = Materials.FirstOrDefault(m => _materialKeywords.TryGetValue(m.Keyword, out var fk) && keywords.Contains(fk)).Info;
+                var type = Types.FirstOrDefault(t => _typeKeywords.TryGetValue(t.Keyword, out var fk) && keywords.Contains(fk)).Type;
+                if (material == null) return "no Open World Loot material";
+                if (type == null) return "no Open World Loot weapon type keyword";
+                string target = material.Name.StartsWith("Draugr")
+                    ? "OWL_Weapon_Draugr_" + type + (material.Name == "DraugrHoned" ? "_Honed" : "") + "_Ench_Frost_01"
+                    : "OWL_Weapon_" + material.Name + "_" + type + "_Ench";
+                return _owlLists.ContainsKey(target) ? null : "Open World Loot has no list " + target;
             }
         }
 

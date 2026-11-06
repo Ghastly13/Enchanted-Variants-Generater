@@ -92,6 +92,8 @@ namespace EnchantedVariantsGenerator
 
     public class InputThing
     {
+        // The input subfolder's name, e.g. "weapons03Nordic"
+        public string Folder { get; init; } = "";
         //                EditorID, Info
         public Dictionary<string, EnchantmentInfo> Enchantments { get; } = new();
         public Dictionary<string, ItemJSON> Weapons { get; } = new();
@@ -154,7 +156,7 @@ namespace EnchantedVariantsGenerator
             return rawJSON;
         }
 
-        public static List<InputThing> GetInputs(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, string dataPath)
+        public static List<InputThing> GetInputs(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, string dataPath, HashSet<FormKey> listedItems)
         {
             Console.WriteLine("Reading input files");
             List<string> enabledMods = new();
@@ -170,7 +172,7 @@ namespace EnchantedVariantsGenerator
             foreach (var folder in Directory.EnumerateDirectories(Path.Combine(dataPath, "input")))
             {
                 Console.WriteLine("Reading folder: " + folder.Replace(dataPath, ""));
-                InputThing input = new();
+                InputThing input = new() { Folder = Path.GetFileName(folder) };
 
                 /* TODO
                 var files = new SortedDictionary<int, InputJSON>();
@@ -191,6 +193,12 @@ namespace EnchantedVariantsGenerator
                     Console.WriteLine("Reading input file \"" + file.Replace(dataPath, "")  + "\"");
                     var inputJSON = JsonConvert.DeserializeObject<InputJSON>(rawJSON);
                     if (inputJSON == null) throw new Exception("Cannot read file \"" + file + "\"!");
+
+                    // Every item an input file names, used or not: discovery leaves those to the files
+                    foreach (var item in (inputJSON.Weapons ?? Array.Empty<ItemJSON>()).Concat(inputJSON.Armors ?? Array.Empty<ItemJSON>()))
+                    {
+                        if (item.FormKey != null && FormKey.TryFactory(item.FormKey, out var listed)) listedItems.Add(listed);
+                    }
 
                     if (inputJSON.RequiredMods != null && !CheckRequiredMods(enabledMods, inputJSON.RequiredMods)) continue;
 
@@ -906,11 +914,15 @@ namespace EnchantedVariantsGenerator
             // Read JSON Files
             string dataPath = ResolveDataPath(state);
             Config config = LoadSettings(state, dataPath);
-            List<InputThing> inputs = GetInputs(state, config, dataPath);
+            var listedItems = new HashSet<FormKey>();
+            List<InputThing> inputs = GetInputs(state, config, dataPath, listedItems);
 
             var linkcache = state.LoadOrder.ToImmutableLinkCache();
             ItemNames.Build(state, linkcache, config);
             ItemNames.WriteRuntimeNameOverrides(state, linkcache, config);
+
+            AssetIndex.Build(state);
+            ItemDiscovery.Run(state, config, linkcache, dataPath, inputs, listedItems);
 
             var weaponDuplicates = new DuplicateIndex();
             var armorDuplicates = new DuplicateIndex();
@@ -920,8 +932,6 @@ namespace EnchantedVariantsGenerator
                 armorDuplicates = IndexExistingArmorVariants(state);
                 Console.WriteLine("Checking for duplicates against " + weaponDuplicates.Count + " existing enchanted weapons and " + armorDuplicates.Count + " existing enchanted armors");
             }
-
-            AssetIndex.Build(state);
 
             Console.WriteLine("Running Generator");
             List<Task<UnsafeThreadStuff>> tasks = new();

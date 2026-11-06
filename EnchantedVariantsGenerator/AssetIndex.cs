@@ -49,7 +49,7 @@ namespace EnchantedVariantsGenerator
         private static string Normalize(string path) => path.Replace('/', '\\').TrimStart('\\').ToLowerInvariant();
 
         // A model path as records store it ("PrvtI\ebony\x.nif", relative to meshes) to its Data path
-        private static bool MeshExists(string? modelFile)
+        public static bool MeshPresent(string? modelFile)
         {
             if (string.IsNullOrWhiteSpace(modelFile)) return false;
             string p = Normalize(modelFile);
@@ -60,7 +60,7 @@ namespace EnchantedVariantsGenerator
         // False (and noted for the summary) when the weapon's model file is missing
         public static bool HasModel(IWeaponGetter weapon)
         {
-            if (MeshExists(weapon.Model?.File)) return true;
+            if (MeshPresent(weapon.Model?.File)) return true;
             _missing.TryAdd(weapon.EditorID ?? weapon.FormKey.ToString(), weapon.Model?.File ?? "(no model)");
             return false;
         }
@@ -70,7 +70,7 @@ namespace EnchantedVariantsGenerator
         {
             var male = armor.WorldModel?.Male?.Model?.File;
             var female = armor.WorldModel?.Female?.Model?.File;
-            if (MeshExists(male) || MeshExists(female)) return true;
+            if (MeshPresent(male) || MeshPresent(female)) return true;
             _missing.TryAdd(armor.EditorID ?? armor.FormKey.ToString(), male ?? female ?? "(no model)");
             return false;
         }

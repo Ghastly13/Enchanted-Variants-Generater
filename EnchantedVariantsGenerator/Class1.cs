@@ -38,6 +38,39 @@ namespace EnchantedVariantsGenerator
         public bool AddDuplicatesToLeveledLists { get; set; } = true;
 
         [SynthesisOrder]
+        [SynthesisSettingName("Discover items: find base items automatically")]
+        [SynthesisTooltip("Add weapons and armor that no input file names to the matching input folder, by material, type and slot. An item is used only when every check passes: playable, named, enchantable, unenchanted, its model file exists, every material keyword is known and agrees on one tier, and it is distributed (a leveled list in use, an NPC, container or outfit, SPID or SkyPatcher). Every decision is written to \"discovered items.txt\" in the patcher's data folder.")]
+        public bool DiscoverItems { get; set; } = true;
+
+        [SynthesisOrder]
+        [SynthesisSettingName("Discover items: excluded materials")]
+        [SynthesisTooltip("Materials never discovered. Names: Iron, Steel, Imperial, Wood, Silver, PolishedSilver, Skyforge, Redguard, Akaviri, Forsworn, Dawnguard, Falmer, FalmerHoned, Draugr, DraugrHoned, NordHero, Orcish, Dwarven, Elven, Glass, Nordic, Ebony, Daedric, Stalhrim, Dragonbone, Amber, DarkSeducer, GoldenSaint, Madness, and the armor materials (e.g. Leather, Scaled, SteelPlate, Dragonplate).")]
+        public List<string> DiscoverExcludedMaterials { get; set; } = new()
+        {
+            "Imperial", "Wood", "Forsworn", "Silver", "Falmer", "FalmerHoned", "Dawnguard", "PolishedSilver", "Skyforge",
+            "NordHero", "Redguard", "Akaviri", "Dragonbone", "Amber", "DarkSeducer", "GoldenSaint", "Madness",
+        };
+
+        [SynthesisOrder]
+        [SynthesisSettingName("Discover items: excluded plugins")]
+        [SynthesisTooltip("Plugins whose items are never discovered. The base game and its DLC are here because Summermyst and Thaumaturgy already make their enchanted variants; their input files cover the rest.")]
+        public List<string> DiscoverExcludedPlugins { get; set; } = new()
+        {
+            "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm",
+            "weapons armor clothing & clutter fixes.esp", "unofficial skyrim special edition patch.esp",
+        };
+
+        [SynthesisOrder]
+        [SynthesisSettingName("Discover items: include Creation Club items")]
+        [SynthesisTooltip("Also discover items from Creation Club plugins (cc....esm/.esl).")]
+        public bool DiscoverCreationClub { get; set; } = false;
+
+        [SynthesisOrder]
+        [SynthesisSettingName("Discover items: excluded items")]
+        [SynthesisTooltip("EditorIDs of items never discovered.")]
+        public List<string> DiscoverExcludedItems { get; set; } = new();
+
+        [SynthesisOrder]
         [SynthesisSettingName("Open World Loot: distribute weapons")]
         [SynthesisTooltip("When Open World Loot is loaded, file generated weapons into its enchanted lists by material, weapon type and tier, through a SkyPatcher INI written beside the output. Weapons then skip the input files' own leveled lists.")]
         public bool OpenWorldLootIntegration { get; set; } = true;
