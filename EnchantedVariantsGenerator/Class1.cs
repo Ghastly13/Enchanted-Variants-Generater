@@ -5,14 +5,6 @@ using Mutagen.Bethesda.Synthesis.Settings;
 
 namespace EnchantedVariantsGenerator
 {
-    public enum SublistMode
-    {
-        // Each tier pooled into the fewest equal lists: every variant at the same odds
-        Normalized,
-        // One list per enchantment mod, weighted by size: for checking what each mod contributes
-        ByMod,
-    }
-
     // The patcher's settings, edited on the patcher's Settings page in Synthesis and saved as settings.json in its data
     // folder. Property names are the JSON keys, the same as the old config.hjson, which is imported once if present.
     public class Config
@@ -33,13 +25,18 @@ namespace EnchantedVariantsGenerator
         public bool SkipDuplicates { get; set; } = true;
 
         [SynthesisOrder]
+        [SynthesisSettingName("Distribute variants beside their vanilla twins")]
+        [SynthesisTooltip("Hand the variants out as loot: each goes in a list of its own (<vanilla list>_EVG) added to the vanilla enchanted list its twin is in (e.g. SublistEnchArmorIronCuirass01, SublistEnchIronSwordFire), at the level that list gives the same tier, through a SkyPatcher INI applied after other mods'. Armor in a weight class vanilla never enchants for its material (light Daedric) follows that material's lists in the other class, placed in the matching lists for its own class. Anything drawing from the vanilla lists, Open World Loot included, then hands them out. Every placement is written to \"distributed items.txt\" in the patcher's data folder.")]
+        public bool DistributeVariants { get; set; } = true;
+
+        [SynthesisOrder]
         [SynthesisSettingName("Add skipped duplicates to leveled lists")]
-        [SynthesisTooltip("Put the existing variant into the input files' leveled lists in place of the skipped one, so those lists stay complete. Not used for weapons while Open World Loot distributes them.")]
+        [SynthesisTooltip("Distribute the existing variant in place of the skipped one, when no leveled list holds it yet.")]
         public bool AddDuplicatesToLeveledLists { get; set; } = true;
 
         [SynthesisOrder]
         [SynthesisSettingName("Discover items: find base items automatically")]
-        [SynthesisTooltip("Add weapons and armor that no input file names to the matching input folder, by material, type and slot. An item is used only when every check passes: playable, named, enchantable, unenchanted, its model file exists, every material keyword is known and agrees on one tier, and it is distributed (a leveled list in use, an NPC, container or outfit, SPID or SkyPatcher). Every decision is written to \"discovered items.txt\" in the patcher's data folder.")]
+        [SynthesisTooltip("Add weapons and armor that no input file names to the matching input folder, by material, type and slot. An item is used only when every check passes: playable, named, enchantable, unenchanted, its model file exists, every material keyword is known and agrees on one tier, it is distributed (a leveled list in use, an NPC, container or outfit, SPID or SkyPatcher), and, while variants are distributed, a vanilla enchanted list for its material and type or slot can take its variants. Every decision is written to \"discovered items.txt\" in the patcher's data folder.")]
         public bool DiscoverItems { get; set; } = true;
 
         [SynthesisOrder]
@@ -69,31 +66,6 @@ namespace EnchantedVariantsGenerator
         [SynthesisSettingName("Discover items: excluded items")]
         [SynthesisTooltip("EditorIDs of items never discovered.")]
         public List<string> DiscoverExcludedItems { get; set; } = new();
-
-        [SynthesisOrder]
-        [SynthesisSettingName("Open World Loot: distribute weapons")]
-        [SynthesisTooltip("When Open World Loot is loaded, file generated weapons into its enchanted lists by material, weapon type and tier, through a SkyPatcher INI written beside the output. Weapons then skip the input files' own leveled lists.")]
-        public bool OpenWorldLootIntegration { get; set; } = true;
-
-        [SynthesisOrder]
-        [SynthesisSettingName("Open World Loot: weight")]
-        [SynthesisTooltip("How many times each generated sublist is added to its OWL list. OWL picks evenly between a list's entries, so this sets the generated variants' share against the ones already there. Lists of OWL patches are weighted automatically instead (see below).")]
-        public int OpenWorldLootWeight { get; set; } = 1;
-
-        [SynthesisOrder]
-        [SynthesisSettingName("Open World Loot: sublist layout")]
-        [SynthesisTooltip("Normalized: each tier pooled into the fewest equal lists, every variant at the same odds. ByMod: one list per enchantment mod, weighted by size, for checking what each mod contributes.")]
-        public SublistMode OpenWorldLootSublists { get; set; } = SublistMode.Normalized;
-
-        [SynthesisOrder]
-        [SynthesisSettingName("Open World Loot: use OWL patches' lists")]
-        [SynthesisTooltip("When an OWL patch (e.g. Open World Loot - Heavy Armory Patch) already lists a weapon's enchanted variants, file the generated variants into that same list instead of choosing one by keywords. Follows the patch's own choices, such as hatchets in the dagger lists. The generated variants are weighted to match the list's existing variants one for one, as far as the 255-entry limit allows.")]
-        public bool OpenWorldLootUsePatchLists { get; set; } = true;
-
-        [SynthesisOrder]
-        [SynthesisSettingName("Open World Loot: skip weapons an OWL patch leaves out")]
-        [SynthesisTooltip("When an OWL patch covers a weapon mod, generate no OWL loot for that mod's weapons the patch never distributes: usually test, unique or unused records.")]
-        public bool OpenWorldLootSkipUnpatchedWeapons { get; set; } = true;
 
         [SynthesisOrder]
         [SynthesisSettingName("Names: use SkyPatcher and Paths of Empyrean renames")]

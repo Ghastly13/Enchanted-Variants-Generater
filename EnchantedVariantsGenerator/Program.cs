@@ -21,8 +21,8 @@ namespace EnchantedVariantsGenerator
     {
         public List<Weapon> WeaponsToSet { get; set; } = new();
         public List<Armor> ArmorToSet { get; set; } = new();
-        public List<LeveledItem> LeveledListsToSet { get; set; } = new();
-        public List<GeneratedWeapon> GeneratedWeapons { get; set; } = new();
+        // The variants to hand out as loot (LootDistribution)
+        public List<GeneratedVariant> Variants { get; set; } = new();
     }
 
     public class LeveledListInfo
@@ -373,15 +373,6 @@ namespace EnchantedVariantsGenerator
             return leveledItemEntry;
         }
 
-        public static void AddToLeveledList(LeveledItem leveledlist, FormKey item)
-        {
-            if (leveledlist.Entries == null)
-            {
-                leveledlist.Entries = new Noggog.ExtendedList<LeveledItemEntry>();
-            }
-            leveledlist.Entries.Add(CreateLeveledItemEntry(1, item));
-        }
-
         public static bool CheckRequiredMods(List<string> enabledMods, string[] requiredMods)
         {
             foreach (var requiredMod in requiredMods)
@@ -392,28 +383,6 @@ namespace EnchantedVariantsGenerator
                 }
             }
             return false;
-        }
-
-        public static LeveledItem GetLeveledList(ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, ISkyrimMod patchMod, string editorID, bool checkExistingGenerated, out bool alreadyExists)
-        {
-            LeveledItem leveledlist;
-
-            if (checkExistingGenerated && linkCache.TryResolve<ILeveledItemGetter>(editorID, out var leveledlist_Original))
-            { // Get Leveled List if it already exists
-                alreadyExists = true;
-                // Console.WriteLine("Leveled List \"" + editorID + "\" already exists in plugin \"" + leveledlist_Original.FormKey.ModKey.ToString() + "\", copying as override and appending changes");
-                //leveledlist = linkCache.Resolve<ILeveledItemGetter>(leveledlist_Original.FormKey).DeepCopy();
-                leveledlist = leveledlist_Original.DeepCopy();
-            }
-            else
-            { // Create Leveled List
-                alreadyExists = false;
-                leveledlist = new LeveledItem(patchMod, editorID);
-                leveledlist.Flags |= LeveledItem.Flag.CalculateForEachItemInCount;
-                leveledlist.Flags |= LeveledItem.Flag.CalculateFromAllLevelsLessThanOrEqualPlayer;
-                leveledlist.Entries = new Noggog.ExtendedList<LeveledItemEntry>();
-            }
-            return leveledlist;
         }
 
         public static readonly Weapon.TranslationMask weapontranslationmark = new(defaultOn: false)
@@ -485,8 +454,6 @@ namespace EnchantedVariantsGenerator
         public static UnsafeThreadStuff GenerateWeapon(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, InputThing input, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, DuplicateIndex duplicates)
         {
             UnsafeThreadStuff stuff = new();
-            // When Open World Loot distributes the generated weapons, the input files' weapon leveled lists are not needed
-            bool owlDistributes = OwlIntegration.IsActive(state, config);
             foreach (var item in input.Weapons.Values)
             {
                 if (config.VerboseLogging) Console.WriteLine("Processing Weapon: " + item.EditorID);
@@ -501,8 +468,6 @@ namespace EnchantedVariantsGenerator
                 }
                 if (!AssetIndex.HasModel(itemGetter)) continue;
 
-                Dictionary<string, LeveledItem> leveledlists = new();
-
                 foreach (var enchantmentInfo in input.Enchantments.Values)
                 {
                     var enchanted_item_EditorID = "Ench_" + item.EditorID + "_" + enchantmentInfo.EditorID;
@@ -511,10 +476,7 @@ namespace EnchantedVariantsGenerator
                     { // An enchanted variant of this item with this enchantment already exists: don't make another
                         duplicates.RecordSkip();
                         if (config.VerboseLogging) Console.WriteLine("Skipping duplicate \"" + enchanted_item_EditorID + "\": already exists as \"" + duplicate.EditorID + "\" (" + duplicate.FormKey + ")");
-                        if (config.AddDuplicatesToLeveledLists && !owlDistributes)
-                        {
-                            UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, duplicate.FormKey, duplicate.EditorID ?? duplicate.FormKey.ToString());
-                        }
+                        if (config.AddDuplicatesToLeveledLists) stuff.Variants.Add(new GeneratedVariant(duplicate.FormKey, itemGetter, enchantmentInfo, true));
                         continue;
                     }
                     var enchanted_item = GetEnchantedWeapon(linkCache, state.PatchMod, enchanted_item_EditorID, config.CheckExistingGenerated, out var EnchantedItemAlreadyExists, enchantmentInfo.Enchantment.ToNullableLink(), itemGetter.ToNullableLink());
@@ -624,14 +586,7 @@ namespace EnchantedVariantsGenerator
                         }
                     }
 
-                    // Only variants this patcher generates; pre-existing duplicates are left to the mod that made them
-                    stuff.GeneratedWeapons.Add(new GeneratedWeapon(enchanted_item.FormKey, itemGetter, enchantmentInfo));
-
-                    // Set Leveled Lists
-                    if (!owlDistributes)
-                    {
-                        UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, enchanted_item.FormKey, enchanted_item_EditorID);
-                    }
+                    stuff.Variants.Add(new GeneratedVariant(enchanted_item.FormKey, itemGetter, enchantmentInfo, false));
                 }
             }
             return stuff;
@@ -654,8 +609,6 @@ namespace EnchantedVariantsGenerator
                 }
                 if (!AssetIndex.HasModel(itemGetter)) continue;
 
-                Dictionary<string, LeveledItem> leveledlists = new();
-
                 foreach (var enchantmentInfo in input.Enchantments.Values)
                 {
                     var enchanted_item_EditorID = "Ench_" + item.EditorID + "_" + enchantmentInfo.EditorID;
@@ -664,10 +617,7 @@ namespace EnchantedVariantsGenerator
                     { // An enchanted variant of this item with this enchantment already exists: don't make another
                         duplicates.RecordSkip();
                         if (config.VerboseLogging) Console.WriteLine("Skipping duplicate \"" + enchanted_item_EditorID + "\": already exists as \"" + duplicate.EditorID + "\" (" + duplicate.FormKey + ")");
-                        if (config.AddDuplicatesToLeveledLists)
-                        {
-                            UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, duplicate.FormKey, duplicate.EditorID ?? duplicate.FormKey.ToString());
-                        }
+                        if (config.AddDuplicatesToLeveledLists) stuff.Variants.Add(new GeneratedVariant(duplicate.FormKey, itemGetter, enchantmentInfo, true));
                         continue;
                     }
                     var enchanted_item = GetEnchantedArmor(linkCache, state.PatchMod, enchanted_item_EditorID, config.CheckExistingGenerated, out var EnchantedItemAlreadyExists, enchantmentInfo.Enchantment.ToNullableLink(), itemGetter.ToNullableLink());
@@ -763,70 +713,10 @@ namespace EnchantedVariantsGenerator
                         }
                     }
 
-                    // Set Leveled Lists
-                    UpdateLeveledLists(state, config, linkCache, stuff, leveledlists, enchantmentInfo, item.EditorID!, enchanted_item.FormKey, enchanted_item_EditorID);
+                    stuff.Variants.Add(new GeneratedVariant(enchanted_item.FormKey, itemGetter, enchantmentInfo, false));
                 }
             }
             return stuff;
-        }
-
-        // Adds (or, for Mode "Remove", removes) one enchanted item in the generated leveled lists of its base item.
-        public static void UpdateLeveledLists(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, UnsafeThreadStuff stuff, Dictionary<string, LeveledItem> leveledlists, EnchantmentInfo enchantmentInfo, string itemEditorID, FormKey entry, string entryLabel)
-        {
-            if (enchantmentInfo.LeveledLists == null) return;
-
-            foreach (var leveledlistinfo in enchantmentInfo.LeveledLists)
-            {
-                var leveledlisteditorid = leveledlistinfo.LeveledListPrefix + itemEditorID + leveledlistinfo.LeveledListSuffix;
-                bool leveledListAlreadyExists = true;
-                LeveledItem leveledlist;
-                if (leveledlists.TryGetValue(leveledlisteditorid, out var cached))
-                {
-                    leveledlist = cached;
-                }
-                else
-                {
-                    leveledlist = GetLeveledList(linkCache, state.PatchMod, leveledlisteditorid, config.CheckExistingGenerated, out var b);
-                    leveledListAlreadyExists = b;
-                    leveledlists.Add(leveledlisteditorid, leveledlist);
-                }
-
-                if (leveledListAlreadyExists)
-                {
-                    leveledlist.Entries ??= new();
-
-                    bool addtoleveledlist = leveledlistinfo.Mode != "Remove";
-                    foreach (var existingEntry in leveledlist.Entries)
-                    {
-                        if (existingEntry.Data?.Reference.FormKey == entry)
-                        { // Check if item already exists in leveled list
-                            if (leveledlistinfo.Mode == "Remove")
-                            {
-                                leveledlist.Entries.Remove(existingEntry);
-                                Console.WriteLine("Removing item: " + entryLabel + " from leveledlist: " + leveledlist.EditorID);
-                                stuff.LeveledListsToSet.Add(leveledlist);
-                            }
-                            else
-                            {
-                                addtoleveledlist = false;
-                            }
-                            break;
-                        }
-                    }
-                    if (addtoleveledlist)
-                    {
-                        AddToLeveledList(leveledlist, entry);
-                        Console.WriteLine("Adding item: " + entryLabel + " to leveledlist: " + leveledlisteditorid);
-                        stuff.LeveledListsToSet.Add(leveledlist);
-                    }
-                }
-                else if (leveledlistinfo.Mode == "Add")
-                {
-                    AddToLeveledList(leveledlist, entry);
-                    Console.WriteLine("Adding item: " + entryLabel + " to leveledlist: " + leveledlisteditorid);
-                    stuff.LeveledListsToSet.Add(leveledlist);
-                }
-            }
         }
 
         // Every playable enchanted weapon in the load order that names a template (base) weapon.
@@ -922,7 +812,10 @@ namespace EnchantedVariantsGenerator
             ItemNames.WriteRuntimeNameOverrides(state, linkcache, config);
 
             AssetIndex.Build(state);
-            ItemDiscovery.Run(state, config, linkcache, dataPath, inputs, listedItems);
+            // What already reaches the world, and the vanilla enchanted lists the variants go beside (as they stand after SkyPatcher)
+            var distribution = Distribution.Build(state, linkcache, dataPath);
+            var loot = LootDistribution.Build(state, linkcache, RuntimeLists.Build(state, linkcache));
+            ItemDiscovery.Run(state, config, linkcache, dataPath, inputs, listedItems, distribution, config.DistributeVariants ? loot : null);
 
             var weaponDuplicates = new DuplicateIndex();
             var armorDuplicates = new DuplicateIndex();
@@ -945,7 +838,7 @@ namespace EnchantedVariantsGenerator
             if (config.SkipDuplicates)
             {
                 Console.WriteLine("Skipped " + weaponDuplicates.Skipped + " weapons and " + armorDuplicates.Skipped + " armors that already had an enchanted variant"
-                    + (config.AddDuplicatesToLeveledLists ? " (the existing variants were added to the leveled lists instead)" : ""));
+                    + (config.AddDuplicatesToLeveledLists ? " (an existing variant no leveled list holds is distributed instead)" : ""));
             }
             Console.WriteLine("Finishing Up!");
             foreach(var task in tasks)
@@ -958,16 +851,12 @@ namespace EnchantedVariantsGenerator
                 {
                     state.PatchMod.Armors.Set(armor);
                 }
-                foreach (var leveledlist in task.Result.LeveledListsToSet)
-                {
-                    state.PatchMod.LeveledItems.Set(leveledlist);
-                }
             }
 
             // Runs after all tasks finish, so its records are created on one thread
-            var generatedWeapons = new List<GeneratedWeapon>();
-            foreach (var task in tasks) generatedWeapons.AddRange(task.Result.GeneratedWeapons);
-            OwlIntegration.Run(state, config, linkcache, generatedWeapons);
+            var variants = new List<GeneratedVariant>();
+            foreach (var task in tasks) variants.AddRange(task.Result.Variants);
+            loot.Run(config, dataPath, variants, distribution);
         } // End of Patching
 
     }

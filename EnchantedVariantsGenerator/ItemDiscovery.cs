@@ -25,11 +25,11 @@ namespace EnchantedVariantsGenerator
     {
         private const string ReportFile = "discovered items.txt";
 
-        private record Material(string Keyword, string Name, string Tier, bool Specific = false, string[]? Supersedes = null);
+        internal record Material(string Keyword, string Name, string Tier, bool Specific = false, string[]? Supersedes = null);
 
         // Weapon tiers follow the hand-written files: folder "weapons<tier>" / "WeaponBows<tier>". A specific keyword
         // (Skyforge, Redguard, ...) names the material even where a generic one (Steel) sits beside it.
-        private static readonly Material[] WeaponMaterials =
+        internal static readonly Material[] WeaponMaterials =
         {
             new("ShWeapMaterialSilverPolished", "PolishedSilver", "03", true),
             new("WAF_WeapMaterialSkyforge", "Skyforge", "03", true),
@@ -63,7 +63,7 @@ namespace EnchantedVariantsGenerator
         };
 
         // Armor tiers follow the hand-written vanilla armor files, separately for heavy and light
-        private static readonly Material[] HeavyArmorMaterials =
+        internal static readonly Material[] HeavyArmorMaterials =
         {
             new("ArmorMaterialIronBanded", "IronBanded", "01", Supersedes: new[] { "ArmorMaterialIron" }),
             new("ArmorMaterialSteelPlate", "SteelPlate", "02", Supersedes: new[] { "ArmorMaterialSteel" }),
@@ -80,7 +80,7 @@ namespace EnchantedVariantsGenerator
             new("ArmorMaterialDaedric", "Daedric", "04"),
             new("ArmorMaterialDragonplate", "Dragonplate", "04"),
         };
-        private static readonly Material[] LightArmorMaterials =
+        internal static readonly Material[] LightArmorMaterials =
         {
             new("ArmorMaterialElvenGilded", "ElvenGilded", "03", Supersedes: new[] { "ArmorMaterialElven" }),
             new("ArmorMaterialImperialStudded", "ImperialStudded", "01", Supersedes: new[] { "ArmorMaterialStudded", "ArmorMaterialImperialLight" }),
@@ -133,6 +133,46 @@ namespace EnchantedVariantsGenerator
             ("Wooden", new[] { "Wood" }), ("Hunting", new[] { "Wood" }),
         };
 
+        // Material by keywords: null and a reason when unknown, conflicting or missing
+        internal static (Material? Material, string? Reason) MaterialOf(IEnumerable<string> keywords, Material[] table)
+        {
+            var materialKeywords = keywords.Where(k => k.Contains("Material", StringComparison.OrdinalIgnoreCase) && !MarkerKeyword.IsMatch(k)).ToList();
+            var known = new List<Material>();
+            foreach (var k in materialKeywords)
+            {
+                var m = table.FirstOrDefault(t => t.Keyword.Equals(k, StringComparison.OrdinalIgnoreCase));
+                if (m == null) return (null, "unknown material keyword " + k);
+                known.Add(m);
+            }
+            if (known.Count == 0) return (null, "no material keyword");
+            var specific = known.Where(m => m.Specific).Select(m => m.Name).Distinct().ToList();
+            if (specific.Count > 1) return (null, "conflicting material keywords " + string.Join(", ", specific));
+            if (specific.Count == 1) return (known.First(m => m.Specific), null);
+            var superseded = known.SelectMany(m => m.Supersedes ?? Array.Empty<string>()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var remaining = known.Where(m => !superseded.Contains(m.Keyword)).Select(m => m.Name).Distinct().ToList();
+            if (remaining.Count > 1) return (null, "conflicting material keywords " + string.Join(", ", remaining));
+            return (known.First(m => m.Name == remaining[0]), null);
+        }
+
+        // As MaterialOf, but where the keywords name several materials the item's name settles it (vanilla scaled
+        // gauntlets carry both the Hide and the Scaled keyword) and keywords not in the table are passed over
+        internal static string? MaterialNameOf(IEnumerable<string> keywords, string? name, Material[] table)
+        {
+            var known = keywords.Where(k => k.Contains("Material", StringComparison.OrdinalIgnoreCase) && !MarkerKeyword.IsMatch(k))
+                .Select(k => table.FirstOrDefault(t => t.Keyword.Equals(k, StringComparison.OrdinalIgnoreCase))).OfType<Material>().ToList();
+            if (known.Count == 0) return null;
+            var (material, _) = MaterialOf(known.Select(m => m.Keyword), table);
+            var candidates = material != null
+                ? new List<string> { material.Name }
+                : known.Where(m => !known.SelectMany(o => o.Supersedes ?? Array.Empty<string>()).Contains(m.Keyword, StringComparer.OrdinalIgnoreCase))
+                    .Select(m => m.Name).Distinct().ToList();
+            if (candidates.Count == 1) return candidates[0];
+            if (string.IsNullOrEmpty(name)) return null;
+            var named = candidates.Where(c => NameWords.Any(w => w.Materials.Contains(c, StringComparer.OrdinalIgnoreCase)
+                && Regex.IsMatch(" " + name + " ", @"\b" + Regex.Escape(w.Phrase) + @"\b", RegexOptions.IgnoreCase))).ToList();
+            return named.Count == 1 ? named[0] : null;
+        }
+
         // Null when the name names the material and no other, else why not
         private static string? NameDisagrees(string name, string material)
         {
@@ -150,7 +190,7 @@ namespace EnchantedVariantsGenerator
         }
 
         public static void Run(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache,
-            string dataPath, List<InputThing> inputs, HashSet<FormKey> listedItems)
+            string dataPath, List<InputThing> inputs, HashSet<FormKey> listedItems, Distribution distribution, LootDistribution? loot)
         {
             string reportPath = Path.Combine(dataPath, ReportFile);
             if (!config.DiscoverItems)
@@ -174,8 +214,6 @@ namespace EnchantedVariantsGenerator
             bool PluginAllowed(ModKey mod) =>
                 mod != state.PatchMod.ModKey && !excludedPlugins.Contains(mod.FileName) && (config.DiscoverCreationClub || !CreationClub.IsMatch(mod.FileName));
 
-            var distribution = Distribution.Build(state, linkCache, dataPath);
-            var owl = OwlIntegration.IsActive(state, config) ? new OwlIntegration.Placement(state, config, linkCache) : null;
 
             // Items crafted from another weapon or armor are upgrades of it (Masterwork, crossbow modifications), not bases
             var upgrades = new HashSet<FormKey>();
@@ -193,21 +231,10 @@ namespace EnchantedVariantsGenerator
                 }
             }
 
-            // Whether the folder's enchanted variants of this item would be distributed: weapons through Open World Loot when
-            // it is active, otherwise only into leveled lists the input files name after the item, which must already exist
-            // (the patcher fills those lists but does not wire new ones into the world)
-            string? VariantsUndistributed(InputThing folder, IMajorRecordGetter item)
-            {
-                if (owl != null && item is IWeaponGetter weapon) return owl.Problem(weapon);
-                foreach (var enchantment in folder.Enchantments.Values)
-                {
-                    foreach (var list in enchantment.LeveledLists ?? new List<LeveledListInfo>())
-                    {
-                        if (list.Mode == "Add" && linkCache.TryResolve<ILeveledItemGetter>(list.LeveledListPrefix + item.EditorID + list.LeveledListSuffix, out _)) return null;
-                    }
-                }
-                return "its enchanted variants would not be distributed (no Open World Loot list and no existing leveled list for it)";
-            }
+            // Whether the item's enchanted variants would reach loot: a vanilla enchanted list for its material and type or
+            // slot (or, for armor, for its material in the other weight class) to file them beside. Not checked when the
+            // patcher's distribution is switched off.
+            string? VariantsUndistributed(InputThing folder, IMajorRecordGetter item) => loot?.Problem(item);
 
             var added = new SortedDictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             var rejected = new SortedDictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -226,27 +253,6 @@ namespace EnchantedVariantsGenerator
                 if (!added.TryGetValue(folder.Folder, out var list)) added[folder.Folder] = list = new();
                 list.Add(item.EditorID + " \"" + name + "\" [" + material + "] " + item.FormKey.ModKey.FileName);
                 addedCount++;
-            }
-
-            // Material by keywords: null and a reason when unknown, conflicting or missing
-            (Material? Material, string? Reason) MaterialOf(IEnumerable<string> keywords, Material[] table)
-            {
-                var materialKeywords = keywords.Where(k => k.Contains("Material", StringComparison.OrdinalIgnoreCase) && !MarkerKeyword.IsMatch(k)).ToList();
-                var known = new List<Material>();
-                foreach (var k in materialKeywords)
-                {
-                    var m = table.FirstOrDefault(t => t.Keyword.Equals(k, StringComparison.OrdinalIgnoreCase));
-                    if (m == null) return (null, "unknown material keyword " + k);
-                    known.Add(m);
-                }
-                if (known.Count == 0) return (null, "no material keyword");
-                var specific = known.Where(m => m.Specific).Select(m => m.Name).Distinct().ToList();
-                if (specific.Count > 1) return (null, "conflicting material keywords " + string.Join(", ", specific));
-                if (specific.Count == 1) return (known.First(m => m.Specific), null);
-                var superseded = known.SelectMany(m => m.Supersedes ?? Array.Empty<string>()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var remaining = known.Where(m => !superseded.Contains(m.Keyword)).Select(m => m.Name).Distinct().ToList();
-                if (remaining.Count > 1) return (null, "conflicting material keywords " + string.Join(", ", remaining));
-                return (known.First(m => m.Name == remaining[0]), null);
             }
 
             // Checks shared by weapons and armor; null when they pass
