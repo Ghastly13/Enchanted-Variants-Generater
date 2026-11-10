@@ -25,6 +25,11 @@ Distributed items
               has any), at the enchantment's tier or the nearest the material has.
     Weapons   the material and type's list for the enchantment's effect (Fire, Frost, ...). Where the material and type
               have no list for that effect, a stand-in named as vanilla would name it is added beside their other ones.
+    Ancient Nord   (Draugr and honed) has no such lists: vanilla hands its frost variants out through the Draugr loadout
+              lists (LItemDraugr02BossWeapon1HMagic, LItemDraugr05Weapon2HMagic, ...), one per Draugr rank and weapon group
+              (one-handed, two-handed, bow), each holding the group's types on a ladder of levels by tier. Each variant
+              goes in every list of its group whose ladder has its material and tier, at those levels, and the new list
+              goes in as often as one vanilla weapon of each material does.
     Other weight class   armor in a weight class vanilla never enchants for its material (light Daedric, heavy Glass)
               follows that material's lists in the other class, placed in the matching lists for its own class; lists in
               between, such as the Daedric wrappers, are copied for the new class.

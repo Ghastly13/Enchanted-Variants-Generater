@@ -28,6 +28,10 @@ namespace EnchantedVariantsGenerator
     //             in the other class are the reference. The new list goes where the reference sits, mirrored into the other
     //             class: added to the counterpart of each heavy/light list holding it (...HeavyBoots... -> ...LightBoots...),
     //             with any list in between (the Daedric wrappers) copied for the new class.
+    //   Ancient Nord (Draugr, honed): vanilla has no SublistEnch lists for it. Its frost variants are handed out through the
+    //             Draugr loadout lists (LItemDraugr02BossWeapon1HMagic, ...), one per Draugr rank and weapon group, each
+    //             holding every type of the group on a ladder of levels by tier. The new list holds the group's variants at
+    //             the levels that ladder gives their material and tier, and goes in as often as one vanilla weapon does.
     // The lists are read as the game holds them after SkyPatcher (RuntimeLists), and the INI goes in a folder that sorts
     // after other mods', so its additions land on the finished lists.
     public class LootDistribution
@@ -54,6 +58,9 @@ namespace EnchantedVariantsGenerator
         private static readonly Regex TrailingTier = new(@"(\d{1,2})[A-Za-z]?$");
         // An enchantment's name without its tier: SUM_Weapon_Alt_Ench_Launch_01 -> SUM_Weapon_Alt_Ench_Launch
         private static readonly Regex TierlessName = new(@"^(.*?)_?\d{1,2}[A-Za-z]?$");
+        // The Draugr loadout lists holding enchanted Ancient Nord weapons, as vanilla (and WACCF, for bows) names them
+        private static readonly Regex DraugrListName = new(@"^(DLC\d)?LItemDraugr\d*(Boss)?Weapon\w*Magic$", RegexOptions.IgnoreCase);
+        private static readonly string[] DraugrMaterials = { "Draugr", "DraugrHoned" };
         private static readonly string[] BaseGame = { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm" };
         private static readonly Regex CreationClub = new(@"^cc[a-z]+sse\d+", RegexOptions.IgnoreCase);
         private static bool IsBaseGame(ModKey mod) => BaseGame.Contains(mod.FileName.String, StringComparer.OrdinalIgnoreCase) || CreationClub.IsMatch(mod.FileName);
@@ -87,10 +94,28 @@ namespace EnchantedVariantsGenerator
             public readonly Dictionary<FormKey, short> Items = new();
         }
 
+        // A Draugr loadout list: its weapon group, and per material and tier the entries one vanilla weapon of that material
+        // has in it, as (level, how many entries at that level)
+        private class DraugrList
+        {
+            public FormKey FormKey;
+            public string EditorID = "";
+            public string Group = "";
+            public readonly Dictionary<(string Material, int Tier), List<(short Level, int Count)>> Ladder = new();
+        }
+
+        // The variants this run puts in one Draugr loadout list
+        private class DraugrNewList
+        {
+            public DraugrList Target = null!;
+            public readonly Dictionary<FormKey, (string Material, int Tier)> Items = new();
+        }
+
         private readonly IPatcherState<ISkyrimMod, ISkyrimModGetter> _state;
         private readonly ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> _linkCache;
         private readonly RuntimeLists _lists;
         private readonly List<Leaf> _leaves = new();
+        private readonly List<DraugrList> _draugrLists = new();
         private readonly Dictionary<string, List<Leaf>> _byClass = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<FormKey, List<Leaf>> _byBase = new();
         private readonly Dictionary<FormKey, List<Leaf>> _byEnchantment = new();
@@ -109,10 +134,72 @@ namespace EnchantedVariantsGenerator
         {
             var result = new LootDistribution(state, linkCache, lists);
             result.FindLeaves();
-            Console.WriteLine("Distribution: " + result._leaves.Count(l => l.Armor) + " vanilla enchanted armor lists and " + result._leaves.Count(l => !l.Armor)
-                + " weapon lists, read after " + lists.IniLines + " SkyPatcher leveled-list lines");
+            result.FindDraugrLists();
+            Console.WriteLine("Distribution: " + result._leaves.Count(l => l.Armor) + " vanilla enchanted armor lists, " + result._leaves.Count(l => !l.Armor)
+                + " weapon lists and " + result._draugrLists.Count + " Draugr loadout lists, read after " + lists.IniLines + " SkyPatcher leveled-list lines");
             return result;
         }
+
+        // The Draugr loadout lists: named as vanilla names them, the game's own or placed straight into one of the game's
+        // lists (WACCF's LItemDraugr02BossWeaponBowMagic is), two in three of their enchanted weapons Ancient Nord
+        private void FindDraugrLists()
+        {
+            foreach (var (fk, entries) in _lists.Entries)
+            {
+                string? editorID = _lists.OriginalEditorID(fk);
+                if (editorID == null || !DraugrListName.IsMatch(editorID)) continue;
+                if (!IsBaseGame(fk.ModKey) && !_lists.Parents(fk).Any(p => IsBaseGame(p.Parent.ModKey))) continue;
+
+                int enchanted = 0;
+                var bases = new Dictionary<FormKey, (string Material, string Group, List<(int Tier, short Level)> Entries)>();
+                foreach (var entry in entries)
+                {
+                    if (!_linkCache.TryResolve<IWeaponGetter>(entry.Reference, out var w) || w.Template.IsNull || w.ObjectEffect.IsNull) continue;
+                    enchanted++;
+                    if (!_linkCache.TryResolve<IWeaponGetter>(w.Template.FormKey, out var b) || DraugrClass(ClassOf(b)) is not (string material, string group)) continue;
+                    if (TierOf(OriginalItemEditorID(entry.Reference, true) ?? w.EditorID) is not int tier) continue;
+                    if (!bases.TryGetValue(b.FormKey, out var info)) bases[b.FormKey] = info = (material, group, new());
+                    info.Entries.Add((tier, entry.Level));
+                }
+                int draugr = bases.Values.Sum(b => b.Entries.Count);
+                if (draugr == 0 || draugr * 3 < enchanted * 2) continue;
+
+                var list = new DraugrList
+                {
+                    FormKey = fk,
+                    EditorID = editorID,
+                    Group = bases.Values.GroupBy(b => b.Group).OrderByDescending(g => g.Sum(b => b.Entries.Count)).First().Key,
+                };
+                // One vanilla weapon's entries per material and tier: the material's entries over the number of its weapons
+                foreach (var byMaterial in bases.Values.Where(b => b.Group == list.Group).GroupBy(b => b.Material))
+                {
+                    int weapons = byMaterial.Count();
+                    foreach (var byTier in byMaterial.SelectMany(b => b.Entries).GroupBy(e => e.Tier))
+                    {
+                        list.Ladder[(byMaterial.Key, byTier.Key)] = byTier.GroupBy(e => e.Level).OrderBy(g => g.Key)
+                            .Select(g => (g.Key, Math.Max(1, (int)Math.Round((double)g.Count() / weapons, MidpointRounding.AwayFromZero)))).ToList();
+                    }
+                }
+                _draugrLists.Add(list);
+            }
+        }
+
+        // "Draugr Sword" -> (Draugr, 1H), "DraugrHoned Greatsword" -> (DraugrHoned, 2H); null for any other class
+        private static (string Material, string Group)? DraugrClass(string? itemClass)
+        {
+            var parts = itemClass?.Split(' ');
+            if (parts is not { Length: 2 } || !DraugrMaterials.Contains(parts[0], StringComparer.OrdinalIgnoreCase)) return null;
+            string? group = parts[1] switch
+            {
+                "Sword" or "WarAxe" or "Mace" or "Dagger" => "1H",
+                "Greatsword" or "Battleaxe" or "Warhammer" => "2H",
+                "Bow" or "Crossbow" => "Bow",
+                _ => null,
+            };
+            return group == null ? null : (parts[0], group);
+        }
+
+        private static string GroupName(string group) => group switch { "1H" => "one-handed", "2H" => "two-handed", _ => "bow" };
 
         // Vanilla enchanted sublists: named SublistEnch..., holding enchanted items of one material and type or slot, and
         // the game's own or placed straight into one of the game's lists (Thaumaturgy's MAG_SublistEnchIronSwordDamageArmor
@@ -289,6 +376,11 @@ namespace EnchantedVariantsGenerator
         public string? Problem(IMajorRecordGetter item)
         {
             string? itemClass = ClassOf(item);
+            if (item is IWeaponGetter && DraugrClass(itemClass) is (string material, string group))
+            {
+                return _draugrLists.Any(d => d.Group == group && d.Ladder.Keys.Any(k => k.Material == material)) ? null
+                    : "no Draugr loadout list for " + (material == "DraugrHoned" ? "honed " : "") + "Ancient Nord " + GroupName(group) + " weapons";
+            }
             if (Family(item, itemClass).Count > 0) return null;
             if (item is IArmorGetter && OtherClassFamily(itemClass) != null) return null;
             if (itemClass == null) return "no vanilla enchanted list holds its variants, and its keywords give no material and " + (item is IArmorGetter ? "weight class and slot" : "weapon type");
@@ -323,6 +415,7 @@ namespace EnchantedVariantsGenerator
             }
 
             var newLists = new Dictionary<string, NewList>(StringComparer.OrdinalIgnoreCase);
+            var draugrNew = new Dictionary<FormKey, DraugrNewList>();
             var skipped = new SortedDictionary<string, SortedDictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
             int placed = 0, alreadyListed = 0;
             // Counted by base item, or by enchantment where the enchantment is the problem
@@ -342,8 +435,30 @@ namespace EnchantedVariantsGenerator
 
                 if (EnchantmentTier(v.Enchantment) is not int tier) { Skip("enchantment tier unknown", v); continue; }
                 string? itemClass = ClassOf(v.BaseItem);
-                var family = Family(v.BaseItem, itemClass);
                 bool armor = v.BaseItem is IArmorGetter;
+
+                // Ancient Nord: every Draugr loadout list of the weapon's group whose ladder has its material and tier
+                if (!armor && DraugrClass(itemClass) is (string draugrMaterial, string group))
+                {
+                    var targets = _draugrLists.Where(d => d.Group == group && d.Ladder.ContainsKey((draugrMaterial, tier))).ToList();
+                    if (targets.Count == 0)
+                    {
+                        string kind = (draugrMaterial == "DraugrHoned" ? "honed " : "") + "Ancient Nord " + GroupName(group) + " weapons";
+                        Skip(_draugrLists.Any(d => d.Group == group && d.Ladder.Keys.Any(k => k.Material == draugrMaterial))
+                            ? "no Draugr loadout list holds tier " + tier + " " + kind
+                            : "no Draugr loadout list for " + kind, v);
+                        continue;
+                    }
+                    foreach (var d in targets)
+                    {
+                        if (!draugrNew.TryGetValue(d.FormKey, out var n)) draugrNew[d.FormKey] = n = new DraugrNewList { Target = d };
+                        n.Items[v.FormKey] = (draugrMaterial, tier);
+                    }
+                    placed++;
+                    continue;
+                }
+
+                var family = Family(v.BaseItem, itemClass);
 
                 NewList? target = null;
                 if (family.Count > 0)
@@ -471,6 +586,43 @@ namespace EnchantedVariantsGenerator
                 }
             }
 
+            // Draugr loadout lists: the new list holds each variant on the ladder for its material and tier, and goes in as
+            // often as one vanilla weapon of each material it holds (only the tiers it has), so the new weapons together get
+            // one vanilla weapon's share
+            var draugrReport = new List<string>();
+            int draugrAdds = 0;
+            foreach (var n in draugrNew.Values.OrderBy(n => n.Target.EditorID, StringComparer.OrdinalIgnoreCase))
+            {
+                var d = n.Target;
+                var entries = n.Items.SelectMany(i => d.Ladder[i.Value].SelectMany(l => Enumerable.Repeat((i.Key, l.Level), l.Count))).ToList();
+                // Only the weights between the entries matter inside the list: divided by what every count shares
+                int divisor = n.Items.Values.SelectMany(k => d.Ladder[k]).Select(l => l.Count).Aggregate(0, Gcd);
+                if (divisor > 1)
+                {
+                    entries = n.Items.SelectMany(i => d.Ladder[i.Value].SelectMany(l => Enumerable.Repeat((i.Key, l.Level), l.Count / divisor))).ToList();
+                }
+                string id = d.EditorID + ListSuffix;
+                var (record, made) = WriteList(config, id, entries, _lists.Record(d.FormKey).Flags);
+                listCount += made;
+
+                var share = n.Items.Values.Distinct().GroupBy(k => k.Material)
+                    .SelectMany(g => g.SelectMany(k => d.Ladder[k])).OrderBy(l => l.Level).ToList();
+                int room = MaxEntriesPerList - _lists.Entries[d.FormKey].Count;
+                int wanted = share.Sum(l => l.Count);
+                if (room <= 0)
+                {
+                    draugrReport.Add("  " + id + " (" + n.Items.Count + ") NOT added: " + d.EditorID + " already has " + MaxEntriesPerList + " entries");
+                    continue;
+                }
+                var adds = share.SelectMany(l => Enumerable.Repeat(l.Level, wanted <= room ? l.Count : Math.Max(1, l.Count * room / wanted))).Take(room).ToList();
+                ini.AppendLine("; " + d.EditorID + " <- " + id + " (" + n.Items.Count + "), " + adds.Count + " entries: one vanilla " + string.Join(" and one ", n.Items.Values.Select(k => k.Material).Distinct().OrderBy(m => m.Length).Select(m => m == "DraugrHoned" ? "honed" : "Ancient Nord")) + " weapon's share");
+                ini.AppendLine("filterByLLs=" + d.FormKey.ModKey.FileName + "|" + d.FormKey.ID.ToString("X6") + ":addToLLs="
+                    + string.Join(",", adds.Select(level => _state.PatchMod.ModKey.FileName + "|" + record.FormKey.ID.ToString("X6") + "~" + level + "~1")));
+                draugrAdds++;
+                draugrReport.Add("  " + id + " (" + n.Items.Count + ") -> " + d.EditorID + ", " + adds.Count + " entries at levels "
+                    + string.Join(",", adds.Distinct()) + (adds.Count < wanted ? " (cut from " + wanted + " to stay within " + MaxEntriesPerList + ")" : ""));
+            }
+
             Directory.CreateDirectory(iniFolder);
             File.WriteAllText(iniPath, ini.ToString());
 
@@ -485,6 +637,9 @@ namespace EnchantedVariantsGenerator
             text.AppendLine("== Other weight class (" + newLists.Values.Count(n => n.Weight != null) + " lists)");
             foreach (var line in otherClassReport) text.AppendLine(line);
             text.AppendLine();
+            text.AppendLine("== Ancient Nord, in the Draugr loadout lists (" + draugrNew.Count + " lists)");
+            foreach (var line in draugrReport) text.AppendLine(line);
+            text.AppendLine();
             text.AppendLine("== Left out (" + skipped.Values.Sum(b => b.Values.Sum()) + " variants), by reason and base item or enchantment");
             foreach (var (reason, bases) in skipped)
             {
@@ -493,7 +648,7 @@ namespace EnchantedVariantsGenerator
             }
             File.WriteAllText(reportPath, text.ToString());
 
-            Console.WriteLine("Distribution: " + placed + " variants in " + listCount + " leveled lists, added to " + iniAdds.Count + " lists by " + iniPath
+            Console.WriteLine("Distribution: " + placed + " variants in " + listCount + " leveled lists, added to " + (iniAdds.Count + draugrAdds) + " lists by " + iniPath
                 + (alreadyListed > 0 ? "; " + alreadyListed + " existing variants that already reach the world left where they are" : ""));
             foreach (var (reason, bases) in skipped) Console.WriteLine("Distribution: left out " + bases.Values.Sum() + " (" + reason + ")");
             Console.WriteLine("Distribution: details in " + reportPath);
@@ -615,6 +770,8 @@ namespace EnchantedVariantsGenerator
             list.Entries = new Noggog.ExtendedList<LeveledItemEntry>();
             return list;
         }
+
+        private static int Gcd(int a, int b) => b == 0 ? a : Gcd(b, a % b);
 
         private static void DeleteIfPresent(string path)
         {

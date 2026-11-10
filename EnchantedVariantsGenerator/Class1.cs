@@ -26,7 +26,7 @@ namespace EnchantedVariantsGenerator
 
         [SynthesisOrder]
         [SynthesisSettingName("Distribute variants beside their vanilla twins")]
-        [SynthesisTooltip("Hand the variants out as loot: each goes in a list of its own (<vanilla list>_EVG) added to the vanilla enchanted list its twin is in (e.g. SublistEnchArmorIronCuirass01, SublistEnchIronSwordFire), at the level that list gives the same tier, through a SkyPatcher INI applied after other mods'. Armor in a weight class vanilla never enchants for its material (light Daedric) follows that material's lists in the other class, placed in the matching lists for its own class. Anything drawing from the vanilla lists, Open World Loot included, then hands them out. Every placement is written to \"distributed items.txt\" in the patcher's data folder.")]
+        [SynthesisTooltip("Hand the variants out as loot: each goes in a list of its own (<vanilla list>_EVG) added to the vanilla enchanted list its twin is in (e.g. SublistEnchArmorIronCuirass01, SublistEnchIronSwordFire), at the level that list gives the same tier, through a SkyPatcher INI applied after other mods'. Armor in a weight class vanilla never enchants for its material (light Daedric) follows that material's lists in the other class, placed in the matching lists for its own class. Ancient Nord weapons go in the Draugr loadout lists (LItemDraugr02BossWeapon1HMagic, ...), as vanilla's do. Anything drawing from the vanilla lists, Open World Loot included, then hands them out. Every placement is written to \"distributed items.txt\" in the patcher's data folder.")]
         public bool DistributeVariants { get; set; } = true;
 
         [SynthesisOrder]
