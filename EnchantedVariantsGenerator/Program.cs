@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
@@ -41,6 +42,8 @@ namespace EnchantedVariantsGenerator
         public string? Sublist { get; set; }
         public ushort? EnchantmentAmount { get; set; }
         public List<LeveledListInfo>? LeveledLists { get; set; }
+        // Set for a detected enchantment: the tier the load order's items give it
+        public int? Tier { get; set; }
 
         public EnchantmentInfo(string editorID, IObjectEffectGetter enchantment)
         {
@@ -169,7 +172,18 @@ namespace EnchantedVariantsGenerator
                 }
             }
             List<InputThing> inputs = new();
-            foreach (var folder in Directory.EnumerateDirectories(Path.Combine(dataPath, "input")))
+            if (!config.UseInputFiles)
+            {
+                Console.WriteLine("Input files: not used (setting \"Use input files\" is off)");
+                return inputs;
+            }
+            string inputFolder = Path.Combine(dataPath, "input");
+            if (!Directory.Exists(inputFolder))
+            {
+                Console.WriteLine("Input files: no input folder in \"" + dataPath + "\"");
+                return inputs;
+            }
+            foreach (var folder in Directory.EnumerateDirectories(inputFolder))
             {
                 Console.WriteLine("Reading folder: " + folder.Replace(dataPath, ""));
                 InputThing input = new() { Folder = Path.GetFileName(folder) };
@@ -451,7 +465,8 @@ namespace EnchantedVariantsGenerator
             return armor;
         }
 
-        public static UnsafeThreadStuff GenerateWeapon(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, InputThing input, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, DuplicateIndex duplicates)
+        // claimed: the item and enchantment pairs already made this run, so a pair two groups share is made once
+        public static UnsafeThreadStuff GenerateWeapon(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, InputThing input, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, DuplicateIndex duplicates, ConcurrentDictionary<(FormKey, FormKey), byte> claimed)
         {
             UnsafeThreadStuff stuff = new();
             foreach (var item in input.Weapons.Values)
@@ -470,6 +485,7 @@ namespace EnchantedVariantsGenerator
 
                 foreach (var enchantmentInfo in input.Enchantments.Values)
                 {
+                    if (!claimed.TryAdd((itemGetter.FormKey, enchantmentInfo.Enchantment.FormKey), 0)) continue;
                     var enchanted_item_EditorID = "Ench_" + item.EditorID + "_" + enchantmentInfo.EditorID;
 
                     if (config.SkipDuplicates && duplicates.TryFind(itemGetter.FormKey, enchantmentInfo.Enchantment.FormKey, enchanted_item_EditorID, out var duplicate))
@@ -592,7 +608,7 @@ namespace EnchantedVariantsGenerator
             return stuff;
         }
 
-        public static UnsafeThreadStuff GenerateArmor(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, InputThing input, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, DuplicateIndex duplicates)
+        public static UnsafeThreadStuff GenerateArmor(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, InputThing input, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, DuplicateIndex duplicates, ConcurrentDictionary<(FormKey, FormKey), byte> claimed)
         {
             UnsafeThreadStuff stuff = new();
             foreach (var item in input.Armors.Values)
@@ -611,6 +627,7 @@ namespace EnchantedVariantsGenerator
 
                 foreach (var enchantmentInfo in input.Enchantments.Values)
                 {
+                    if (!claimed.TryAdd((itemGetter.FormKey, enchantmentInfo.Enchantment.FormKey), 0)) continue;
                     var enchanted_item_EditorID = "Ench_" + item.EditorID + "_" + enchantmentInfo.EditorID;
 
                     if (config.SkipDuplicates && duplicates.TryFind(itemGetter.FormKey, enchantmentInfo.Enchantment.FormKey, enchanted_item_EditorID, out var duplicate))
@@ -746,7 +763,8 @@ namespace EnchantedVariantsGenerator
         }
 
         // A local copy of this patcher gets its own data folder, named after the project. If that folder has no
-        // input files, use the git patcher's folder, so both versions share one set of inputs.
+        // input files, use the git patcher's folder, so both versions share one set of inputs. With no input folder
+        // anywhere, the patcher's own folder (input files are optional: enchantments can be detected).
         public static string ResolveDataPath(IPatcherState<ISkyrimMod, ISkyrimModGetter> state)
         {
             string own = state.ExtraSettingsDataPath?.ToString() ?? throw new Exception("Synthesis did not provide a data folder");
@@ -763,7 +781,8 @@ namespace EnchantedVariantsGenerator
                     return shared;
                 }
             }
-            throw new Exception("No input folder found in \"" + own + "\" or in \"Enchanted-Variants-Generator\" beside it");
+            Directory.CreateDirectory(own);
+            return own;
         }
 
         // Removes a file this patcher wrote under its old misspelled name ("Generater"), and its folder once empty
@@ -804,6 +823,10 @@ namespace EnchantedVariantsGenerator
             // Read JSON Files
             string dataPath = ResolveDataPath(state);
             Config config = LoadSettings(state, dataPath);
+            if (!config.DetectEnchantments && !config.UseInputFiles)
+            {
+                Console.WriteLine("WARNING: \"Detect enchantments and items from the load order\" and \"Use input files\" are both off: no variants will be made");
+            }
             var listedItems = new HashSet<FormKey>();
             List<InputThing> inputs = GetInputs(state, config, dataPath, listedItems);
 
@@ -815,7 +838,8 @@ namespace EnchantedVariantsGenerator
             // What already reaches the world, and the vanilla enchanted lists the variants go beside (as they stand after SkyPatcher)
             var distribution = Distribution.Build(state, linkcache, dataPath);
             var loot = LootDistribution.Build(state, linkcache, RuntimeLists.Build(state, linkcache));
-            ItemDiscovery.Run(state, config, linkcache, dataPath, inputs, listedItems, distribution, config.DistributeVariants ? loot : null);
+            // With "Detect enchantments" on: discovered items grouped by kind, each with the enchantments its kind carries
+            List<InputThing> detected = ItemDiscovery.Run(state, config, linkcache, dataPath, inputs, listedItems, distribution, loot);
 
             var weaponDuplicates = new DuplicateIndex();
             var armorDuplicates = new DuplicateIndex();
@@ -827,13 +851,22 @@ namespace EnchantedVariantsGenerator
             }
 
             Console.WriteLine("Running Generator");
+            // Detected groups first, so where an input file names the same item and enchantment, the load order's tier,
+            // charge and name win; input files then add only what detection did not make
+            var claimed = new ConcurrentDictionary<(FormKey, FormKey), byte>();
             List<Task<UnsafeThreadStuff>> tasks = new();
-            foreach (var input in inputs)
+            foreach (var batch in new[] { detected, inputs })
             {
-                tasks.Add(Task<UnsafeThreadStuff>.Factory.StartNew(() => GenerateArmor(state, config, input, linkcache, armorDuplicates)));
-                tasks.Add(Task<UnsafeThreadStuff>.Factory.StartNew(() => GenerateWeapon(state, config, input, linkcache, weaponDuplicates)));
+                var started = new List<Task<UnsafeThreadStuff>>();
+                foreach (var input in batch)
+                {
+                    started.Add(Task<UnsafeThreadStuff>.Factory.StartNew(() => GenerateArmor(state, config, input, linkcache, armorDuplicates, claimed)));
+                    started.Add(Task<UnsafeThreadStuff>.Factory.StartNew(() => GenerateWeapon(state, config, input, linkcache, weaponDuplicates, claimed)));
+                }
+                Task.WaitAll(started.ToArray());
+                tasks.AddRange(started);
             }
-            Task.WaitAll(tasks.ToArray());
+            Console.WriteLine("Generated from " + detected.Count + " kinds with detected enchantments and " + inputs.Count + " input folders");
             AssetIndex.Report();
             if (config.SkipDuplicates)
             {

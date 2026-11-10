@@ -311,6 +311,14 @@ namespace EnchantedVariantsGenerator
             }
         }
 
+        // Prefix/suffix an existing enchanted item's name puts around its base's name (plugin or runtime spelling); null
+        // for a unique name
+        public static (string Prefix, string Suffix)? AffixOf(FormKey baseItem, string? baseName, string? variantName)
+            => SplitAffix(variantName, baseName, NameOf(baseItem, baseName));
+
+        // Whether "Match enchantment names" found a name for the enchantment on the load order's items
+        public static bool HasLoadOrderName(FormKey enchantment) => _affixes.ContainsKey(enchantment);
+
         // Name for an enchanted variant of the item, e.g. "Daedric Sword of the Inferno"
         public static string Compose(FormKey item, string? itemName, EnchantmentInfo enchantment)
         {

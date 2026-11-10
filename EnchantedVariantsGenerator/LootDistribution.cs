@@ -65,6 +65,9 @@ namespace EnchantedVariantsGenerator
         private static readonly Regex CreationClub = new(@"^cc[a-z]+sse\d+", RegexOptions.IgnoreCase);
         private static bool IsBaseGame(ModKey mod) => BaseGame.Contains(mod.FileName.String, StringComparer.OrdinalIgnoreCase) || CreationClub.IsMatch(mod.FileName);
 
+        // An enchanted item already in a vanilla list: what it says about its enchantment (detection reads these)
+        private record SourceItem(FormKey Item, IMajorRecordGetter Base, FormKey Enchantment, int? Tier, ushort? Amount, string? Name);
+
         // A vanilla enchanted sublist: the enchanted items it holds directly
         private class Leaf
         {
@@ -76,6 +79,7 @@ namespace EnchantedVariantsGenerator
             public int Tier;
             public readonly SortedDictionary<int, short> TierLevels = new();
             public readonly HashSet<FormKey> Enchantments = new();
+            public readonly List<SourceItem> Items = new();
             // Set for a stand-in effect list (EffectList): FormKey is then the list holding it, entered at this level
             public string? PlacedIn;
             public short PlaceLevel;
@@ -102,6 +106,7 @@ namespace EnchantedVariantsGenerator
             public string EditorID = "";
             public string Group = "";
             public readonly Dictionary<(string Material, int Tier), List<(short Level, int Count)>> Ladder = new();
+            public readonly List<(string Material, SourceItem Item)> Items = new();
         }
 
         // The variants this run puts in one Draugr loadout list
@@ -152,6 +157,7 @@ namespace EnchantedVariantsGenerator
 
                 int enchanted = 0;
                 var bases = new Dictionary<FormKey, (string Material, string Group, List<(int Tier, short Level)> Entries)>();
+                var items = new List<(string Material, string Group, SourceItem Item)>();
                 foreach (var entry in entries)
                 {
                     if (!_linkCache.TryResolve<IWeaponGetter>(entry.Reference, out var w) || w.Template.IsNull || w.ObjectEffect.IsNull) continue;
@@ -160,6 +166,7 @@ namespace EnchantedVariantsGenerator
                     if (TierOf(OriginalItemEditorID(entry.Reference, true) ?? w.EditorID) is not int tier) continue;
                     if (!bases.TryGetValue(b.FormKey, out var info)) bases[b.FormKey] = info = (material, group, new());
                     info.Entries.Add((tier, entry.Level));
+                    items.Add((material, group, new SourceItem(entry.Reference, b, w.ObjectEffect.FormKey, tier, w.EnchantmentAmount, w.Name?.String)));
                 }
                 int draugr = bases.Values.Sum(b => b.Entries.Count);
                 if (draugr == 0 || draugr * 3 < enchanted * 2) continue;
@@ -180,6 +187,7 @@ namespace EnchantedVariantsGenerator
                             .Select(g => (g.Key, Math.Max(1, (int)Math.Round((double)g.Count() / weapons, MidpointRounding.AwayFromZero)))).ToList();
                     }
                 }
+                foreach (var (material, group, item) in items) if (group == list.Group) list.Items.Add((material, item));
                 _draugrLists.Add(list);
             }
         }
@@ -223,13 +231,16 @@ namespace EnchantedVariantsGenerator
                 {
                     IMajorRecordGetter? baseItem;
                     FormKey enchantment;
-                    string? itemEditorID;
+                    string? itemEditorID, itemName;
+                    ushort? amount = null;
                     bool isWeapon;
                     if (_linkCache.TryResolve<IWeaponGetter>(entry.Reference, out var w) && !w.Template.IsNull && !w.ObjectEffect.IsNull)
                     {
                         baseItem = _linkCache.TryResolve<IWeaponGetter>(w.Template.FormKey, out var b) ? b : null;
                         enchantment = w.ObjectEffect.FormKey;
                         itemEditorID = w.EditorID;
+                        itemName = w.Name?.String;
+                        amount = w.EnchantmentAmount;
                         isWeapon = true;
                         weapon++;
                     }
@@ -238,6 +249,7 @@ namespace EnchantedVariantsGenerator
                         baseItem = _linkCache.TryResolve<IArmorGetter>(a.TemplateArmor.FormKey, out var b) ? b : null;
                         enchantment = a.ObjectEffect.FormKey;
                         itemEditorID = a.EditorID;
+                        itemName = a.Name?.String;
                         isWeapon = false;
                         armor++;
                     }
@@ -251,6 +263,7 @@ namespace EnchantedVariantsGenerator
                     {
                         bases.Add(baseItem.FormKey);
                         if (ClassOf(baseItem) is string c) classes[c] = classes.GetValueOrDefault(c) + 1;
+                        leaf.Items.Add(new SourceItem(entry.Reference, baseItem, enchantment, TierOf(itemEditorID), amount, itemName));
                     }
                     if (TierOf(itemEditorID) is int tier)
                     {
@@ -387,12 +400,157 @@ namespace EnchantedVariantsGenerator
             return "no vanilla enchanted list for " + itemClass + (item is IArmorGetter ? " in either weight class" : "");
         }
 
-        // Tier of a generated variant's enchantment: the digits of its first non-NPC leveled-list suffix in the input file
-        // ("_04" -> 4), else the trailing digits of its EditorID
+        // Tier of a generated variant's enchantment: the detected tier, else the digits of its first non-NPC leveled-list
+        // suffix in the input file ("_04" -> 4), else the trailing digits of its EditorID
         private static int? EnchantmentTier(EnchantmentInfo info)
         {
+            if (info.Tier is int detected) return detected;
             var suffix = info.LeveledLists?.Where(l => !l.LeveledListSuffix.Contains("NPC")).Select(l => l.LeveledListSuffix).FirstOrDefault();
             return TierOf(suffix) ?? TierOf(info.EditorID);
+        }
+
+        // The enchantments detected for one kind of base item, shared by every base of that kind
+        public record DetectedKind(string Key, string Label, List<EnchantmentInfo> Enchantments);
+        private readonly Dictionary<string, DetectedKind?> _detected = new(StringComparer.Ordinal);
+        private Dictionary<int, ushort>? _defaultAmounts;
+
+        public IEnumerable<DetectedKind> DetectedKinds => _detected.Values.OfType<DetectedKind>().OrderBy(k => k.Label, StringComparer.OrdinalIgnoreCase);
+
+        // The enchantments the load order already hands out on enchanted items of the base's kind, from the lists its
+        // variants would go in: its own variants' lists, else its material and type or slot, else (armor) the same material
+        // in the other weight class, else (Ancient Nord) the Draugr loadout lists for its material and weapon group, plus
+        // the game's own enchanted Ancient Nord weapons of its material and type. Each keeps the tier, charge and name those
+        // items give it. Null when no such item exists.
+        public DetectedKind? EnchantmentsFor(IMajorRecordGetter baseItem)
+        {
+            string? itemClass = ClassOf(baseItem);
+            bool armor = baseItem is IArmorGetter;
+            string key, label;
+            List<(SourceItem Item, int Tier)> sources;
+            if (!armor && DraugrClass(itemClass) is (string material, string group))
+            {
+                var listed = _draugrLists.Where(d => d.Group == group).SelectMany(d => d.Items).Where(i => i.Material == material).Select(i => i.Item).ToList();
+                // The game's own variants no loadout list holds: the honed greatsword's fire (Red Eagle's "of Embers", one
+                // placed "of Burning"). They make the type a kind of its own.
+                var listedEnchantments = listed.Select(i => i.Enchantment).ToHashSet();
+                var own = GameAncientNordVariants(itemClass!).Where(i => !listedEnchantments.Contains(i.Enchantment)).ToList();
+                string type = itemClass!.Split(' ')[1];
+                key = "Draugr|" + material + "|" + group + (own.Count > 0 ? "|" + type : "");
+                label = (material == "DraugrHoned" ? "honed " : "") + "Ancient Nord " + (own.Count > 0 ? type.ToLowerInvariant() + "s (Draugr loadout lists and the game's own variants)" : GroupName(group) + " weapons (Draugr loadout lists)");
+                if (_detected.TryGetValue(key, out var cached)) return cached;
+                sources = listed.Concat(own).Select(i => (i, i.Tier ?? 0)).ToList();
+            }
+            else if (Family(baseItem, itemClass) is { Count: > 0 } family)
+            {
+                key = (armor ? "Armor|" : "Weapon|") + string.Join(",", family.Select(l => l.FormKey.ToString()).OrderBy(s => s, StringComparer.Ordinal));
+                bool own = _byBase.ContainsKey(baseItem.FormKey) && (itemClass == null || !_byClass.TryGetValue(itemClass, out var byClass) || byClass.Count != family.Count);
+                label = (itemClass ?? "unclassed") + (own ? " (" + baseItem.EditorID + "'s own lists)" : "");
+                if (_detected.TryGetValue(key, out var cached)) return cached;
+                // An armor list's own name gives the tier; a weapon item's EditorID does (its list holds every tier)
+                sources = family.SelectMany(l => l.Items.Select(i => (i, armor ? l.Tier : i.Tier ?? l.Tier))).ToList();
+            }
+            else if (armor && OtherClassFamily(itemClass) is { } other)
+            {
+                key = "Armor|" + itemClass;
+                label = itemClass + " (from " + other.Material + " " + other.OtherWeight + ")";
+                if (_detected.TryGetValue(key, out var cached)) return cached;
+                sources = other.Family.SelectMany(l => l.Items.Select(i => (i, l.Tier))).ToList();
+            }
+            else return null;
+
+            var enchantments = new List<EnchantmentInfo>();
+            foreach (var g in sources.GroupBy(s => s.Item.Enchantment))
+            {
+                if (!_linkCache.TryResolve<IObjectEffectGetter>(g.Key, out var enchantment)) continue;
+                string editorID = OriginalEnchantmentEditorID(g.Key) ?? enchantment.EditorID ?? g.Key.ToString();
+                // A weapon enchantment's own number is its tier (vanilla numbers each item after its enchantment; Paths of
+                // Empyrean's longbows, EnchGlassBowFire03_L "of Scorching", are one tier off). Armor goes by its lists' tier,
+                // as it is placed; else the tier most of the items have.
+                int tier = !armor && TierOf(editorID) is int own ? own
+                    : g.Where(s => s.Tier > 0).GroupBy(s => s.Tier).OrderByDescending(t => t.Count()).ThenBy(t => t.Key).Select(t => t.Key).FirstOrDefault();
+                if (tier <= 0) tier = TierOf(editorID) ?? 0;
+                // Most common spelling around the base's name; an item with a unique name says nothing ("Stalhrim Bracers of
+                // Fire" around "Stalhrim Light Gauntlets"), so then the spelling on any kind's items with this enchantment.
+                // With none anywhere, and no load-order name for it, a variant would look like its base: left out.
+                var affix = MostCommonAffix(g.Select(s => s.Item)) ?? GlobalAffix(g.Key);
+                if (affix == null && !ItemNames.HasLoadOrderName(g.Key)) continue;
+                ushort? amount = null;
+                if (!armor)
+                {
+                    amount = g.Select(s => s.Item.Amount).OfType<ushort>().GroupBy(a => a).OrderByDescending(a => a.Count()).ThenByDescending(a => a.Key)
+                        .Select(a => (ushort?)a.Key).FirstOrDefault() ?? DefaultAmount(tier);
+                }
+                enchantments.Add(new EnchantmentInfo(editorID, enchantment)
+                {
+                    Tier = tier > 0 ? tier : null,
+                    EnchantmentAmount = amount,
+                    Prefix = affix?.Prefix,
+                    Suffix = affix?.Suffix,
+                });
+            }
+            var kind = enchantments.Count == 0 ? null
+                : new DetectedKind(key, label, enchantments.OrderBy(e => e.Tier ?? 0).ThenBy(e => e.EditorID, StringComparer.OrdinalIgnoreCase).ToList());
+            _detected[key] = kind;
+            return kind;
+        }
+
+        private Dictionary<string, List<SourceItem>>? _gameAncientNord;
+
+        // Playable enchanted Ancient Nord weapons the base game or Creation Club defines, by class ("DraugrHoned Greatsword"),
+        // wherever the game puts them
+        private List<SourceItem> GameAncientNordVariants(string itemClass)
+        {
+            if (_gameAncientNord == null)
+            {
+                _gameAncientNord = new(StringComparer.OrdinalIgnoreCase);
+                foreach (var w in _state.LoadOrder.PriorityOrder.Weapon().WinningOverrides())
+                {
+                    if (w.Template.IsNull || w.ObjectEffect.IsNull || !IsBaseGame(w.FormKey.ModKey)) continue;
+                    if (w.Data != null && w.Data.Flags.HasFlag(WeaponData.Flag.NonPlayable)) continue;
+                    if (!_linkCache.TryResolve<IWeaponGetter>(w.Template.FormKey, out var b) || ClassOf(b) is not string c || DraugrClass(c) == null) continue;
+                    if (!_gameAncientNord.TryGetValue(c, out var items)) _gameAncientNord[c] = items = new();
+                    items.Add(new SourceItem(w.FormKey, b, w.ObjectEffect.FormKey, TierOf(OriginalItemEditorID(w.FormKey, true) ?? w.EditorID), w.EnchantmentAmount, w.Name?.String));
+                }
+            }
+            return _gameAncientNord.TryGetValue(itemClass, out var found) ? found : new();
+        }
+
+        // The enchantment's EditorID in the plugin that defines it (Thaumaturgy renames vanilla ones), so generated
+        // EditorIDs stay the same whatever renames the load order applies
+        private string? OriginalEnchantmentEditorID(FormKey enchantment)
+        {
+            if (!_state.LoadOrder.ContainsKey(enchantment.ModKey) || _state.LoadOrder[enchantment.ModKey].Mod is not { } mod) return null;
+            return mod.ObjectEffects.TryGetValue(enchantment, out var e) ? e.EditorID : null;
+        }
+
+        private static (string Prefix, string Suffix)? MostCommonAffix(IEnumerable<SourceItem> items) =>
+            items.Select(s => ItemNames.AffixOf(s.Base.FormKey, NameOf(s.Base), s.Name)).OfType<(string Prefix, string Suffix)>()
+                .GroupBy(a => a).OrderByDescending(a => a.Count()).ThenBy(a => a.Key.Prefix.Length).ThenBy(a => a.Key.Prefix + "|" + a.Key.Suffix, StringComparer.Ordinal)
+                .Select(a => ((string Prefix, string Suffix)?)a.Key).FirstOrDefault();
+
+        private Dictionary<FormKey, (string Prefix, string Suffix)?>? _globalAffixes;
+
+        // The enchantment's spelling on every list item carrying it, whatever its kind
+        private (string Prefix, string Suffix)? GlobalAffix(FormKey enchantment)
+        {
+            _globalAffixes ??= _leaves.SelectMany(l => l.Items).Concat(_draugrLists.SelectMany(d => d.Items.Select(i => i.Item)))
+                .GroupBy(i => i.Enchantment).ToDictionary(g => g.Key, g => MostCommonAffix(g));
+            return _globalAffixes.TryGetValue(enchantment, out var affix) ? affix : null;
+        }
+
+        private static string? NameOf(IMajorRecordGetter item) => item switch
+        {
+            IWeaponGetter w => w.Name?.String,
+            IArmorGetter a => a.Name?.String,
+            _ => null,
+        };
+
+        // A weapon enchantment no item gives a charge: the charge most weapons of that tier have
+        private ushort? DefaultAmount(int tier)
+        {
+            _defaultAmounts ??= _leaves.Where(l => !l.Armor).SelectMany(l => l.Items).Where(i => i.Tier is int && i.Amount is ushort)
+                .GroupBy(i => i.Tier!.Value).ToDictionary(g => g.Key, g => g.GroupBy(i => i.Amount!.Value).OrderByDescending(a => a.Count()).First().Key);
+            return _defaultAmounts.TryGetValue(tier, out var amount) ? amount : null;
         }
 
         // distribution: what already reaches the world, so an existing variant standing in for a duplicate is filed only

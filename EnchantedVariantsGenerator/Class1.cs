@@ -34,14 +34,27 @@ namespace EnchantedVariantsGenerator
         [SynthesisTooltip("Distribute the existing variant in place of the skipped one, when no leveled list holds it yet.")]
         public bool AddDuplicatesToLeveledLists { get; set; } = true;
 
+        // Where the items and enchantments come from: the load order, the input files, or both (one item and enchantment
+        // pair is made once either way)
         [SynthesisOrder]
-        [SynthesisSettingName("Discover items: find base items automatically")]
-        [SynthesisTooltip("Add weapons and armor that no input file names to the matching input folder, by material, type and slot. An item is used only when every check passes: playable, named, enchantable, unenchanted, its model file exists, every material keyword is known and agrees on one tier, it is distributed (a leveled list in use, an NPC, container or outfit, SPID or SkyPatcher), and, while variants are distributed, a vanilla enchanted list for its material and type or slot can take its variants. Every decision is written to \"discovered items.txt\" in the patcher's data folder.")]
+        [SynthesisSettingName("Detect enchantments and items from the load order")]
+        [SynthesisTooltip("Find the base weapons and armor in the load order (see \"Items: ...\") and give each the enchantments the load order already hands out on enchanted items of its kind, read from the vanilla enchanted lists its variants go in: an Iron sword gets what vanilla, Summermyst and Thaumaturgy put on Iron swords, at the same tier, charge and name. Light Daedric armor follows heavy Daedric; Ancient Nord weapons follow the Draugr loadout lists and the game's own Ancient Nord variants (frost, and fire on honed greatswords). Needs no input files. Every kind and its enchantments are listed in \"discovered items.txt\".")]
+        public bool DetectEnchantments { get; set; } = true;
+
+        [SynthesisOrder]
+        [SynthesisSettingName("Use input files")]
+        [SynthesisTooltip("Read the \"input\" folder in the patcher's data folder: every enchantment file in a subfolder applies to every weapon and armor file in it. With detection on as well, the input files add what detection does not make.")]
+        public bool UseInputFiles { get; set; } = false;
+
+        // JSON key kept from when this switched discovery itself on and off
+        [SynthesisOrder]
+        [SynthesisSettingName("Use input files: add found items to their folders")]
+        [SynthesisTooltip("Add the base items found in the load order (see \"Items: ...\") that no input file names to the input folder for their type and tier, so they get that folder's enchantments too. Only with \"Use input files\" on.")]
         public bool DiscoverItems { get; set; } = true;
 
         [SynthesisOrder]
-        [SynthesisSettingName("Discover items: excluded materials")]
-        [SynthesisTooltip("Materials never discovered. Names: Iron, Steel, Imperial, Wood, Silver, PolishedSilver, Skyforge, Redguard, Akaviri, Forsworn, Dawnguard, Falmer, FalmerHoned, Draugr, DraugrHoned, NordHero, Orcish, Dwarven, Elven, Glass, Nordic, Ebony, Daedric, Stalhrim, Dragonbone, Amber, DarkSeducer, GoldenSaint, Madness, and the armor materials (e.g. Leather, Scaled, SteelPlate, Dragonplate).")]
+        [SynthesisSettingName("Items: excluded materials")]
+        [SynthesisTooltip("Materials never found in the load order. Names: Iron, Steel, Imperial, Wood, Silver, PolishedSilver, Skyforge, Redguard, Akaviri, Forsworn, Dawnguard, Falmer, FalmerHoned, Draugr, DraugrHoned, NordHero, Orcish, Dwarven, Elven, Glass, Nordic, Ebony, Daedric, Stalhrim, Dragonbone, Amber, DarkSeducer, GoldenSaint, Madness, and the armor materials (e.g. Leather, Scaled, SteelPlate, Dragonplate). Every item found or left out, with the reason, is written to \"discovered items.txt\" in the patcher's data folder.")]
         public List<string> DiscoverExcludedMaterials { get; set; } = new()
         {
             "Imperial", "Wood", "Forsworn", "Silver", "Falmer", "FalmerHoned", "Dawnguard", "PolishedSilver", "Skyforge",
@@ -49,22 +62,18 @@ namespace EnchantedVariantsGenerator
         };
 
         [SynthesisOrder]
-        [SynthesisSettingName("Discover items: excluded plugins")]
-        [SynthesisTooltip("Plugins whose items are never discovered. The base game and its DLC are here because Summermyst and Thaumaturgy already make their enchanted variants; their input files cover the rest.")]
-        public List<string> DiscoverExcludedPlugins { get; set; } = new()
-        {
-            "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm",
-            "weapons armor clothing & clutter fixes.esp", "unofficial skyrim special edition patch.esp",
-        };
+        [SynthesisSettingName("Items: excluded plugins")]
+        [SynthesisTooltip("Plugins whose items are never found in the load order. Leave the base game in only when input files cover its items: with detection on, vanilla items get the enchantments other mods put on their kind (variants that already exist are skipped as duplicates).")]
+        public List<string> DiscoverExcludedPlugins { get; set; } = new();
 
         [SynthesisOrder]
-        [SynthesisSettingName("Discover items: include Creation Club items")]
-        [SynthesisTooltip("Also discover items from Creation Club plugins (cc....esm/.esl).")]
+        [SynthesisSettingName("Items: include Creation Club items")]
+        [SynthesisTooltip("Also find items from Creation Club plugins (cc....esm/.esl).")]
         public bool DiscoverCreationClub { get; set; } = false;
 
         [SynthesisOrder]
-        [SynthesisSettingName("Discover items: excluded items")]
-        [SynthesisTooltip("EditorIDs of items never discovered.")]
+        [SynthesisSettingName("Items: excluded items")]
+        [SynthesisTooltip("EditorIDs of items never found in the load order.")]
         public List<string> DiscoverExcludedItems { get; set; } = new();
 
         [SynthesisOrder]

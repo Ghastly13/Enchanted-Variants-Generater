@@ -4,15 +4,27 @@ Settings
   Edit the patcher's settings on its Settings page in Synthesis. They are saved here as settings.json.
   An older config.hjson is imported into settings.json on the first run and renamed config.hjson.migrated.
 
-Input
-  Put the input files in an "input" folder here, one subfolder per group: every enchantment file in a subfolder
-  applies to every weapon/armor file in that same subfolder. Files are .hjson (or .json) with RequiredMods,
-  Weapons / Armors and Enchantments sections.
+Where items and enchantments come from
+  Two settings, either or both: "Detect enchantments and items from the load order" (on by default) and "Use input
+  files" (off by default). With both on, an item and enchantment pair is made once, detection first.
 
-Discovered items
-  Weapons and armor no input file names are found automatically and added to the folder for their type and tier
-  (settings "Discover items: ..."). Each run writes "discovered items.txt" here: every item added, and every candidate
-  left out with the reason. An input file naming an item always takes precedence over discovery.
+  Detection (no input files needed)
+  The patcher finds the base weapons and armor in the load order by material, type and slot (settings "Items: ..."),
+  and gives each the enchantments the load order already hands out on enchanted items of its kind, read from the
+  vanilla enchanted lists its variants go in: an Iron sword (vanilla, Heavy Armory's, Animated Armoury's) gets every
+  enchantment vanilla, Summermyst and Thaumaturgy put on the Iron swords in those lists, with the tier, charge and
+  name they give it there. Light Daedric armor follows heavy Daedric. Ancient Nord weapons follow the Draugr loadout
+  lists (frost) and the game's own Ancient Nord variants of their type (fire on honed greatswords: "of Embers",
+  "of Burning"). A kind with no enchanted items to go by (Imperial armor) gets nothing.
+
+  Input files
+  An "input" folder here, one subfolder per group: every enchantment file in a subfolder applies to every weapon/armor
+  file in that same subfolder. Files are .hjson (or .json) with RequiredMods, Weapons / Armors and Enchantments
+  sections. With "Use input files: add found items to their folders" on, items found in the load order that no input
+  file names are also added to the folder for their type and tier.
+
+  Each run writes "discovered items.txt" here: every kind with its detected enchantments (tier, charge, name), every
+  item found and where it went, and every candidate left out with the reason.
 
 Distributed items
   The variants are handed out beside their vanilla twins (setting "Distribute variants beside their vanilla twins").

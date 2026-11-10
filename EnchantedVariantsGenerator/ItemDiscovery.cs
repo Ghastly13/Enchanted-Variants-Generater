@@ -13,14 +13,17 @@ using Mutagen.Bethesda.Synthesis;
 
 namespace EnchantedVariantsGenerator
 {
-    // Finds base weapons and armor no input file names and files each into the input folder for its type and tier, the
-    // way the hand-written files are organised. Built to refuse rather than guess: an item is used only when every
+    // Finds base weapons and armor in the load order. Built to refuse rather than guess: an item is used only when every
     // check passes, and every candidate's outcome, with the reason, goes to "discovered items.txt" in the data folder.
     //   Candidates   weapons and armor with a material keyword, not enchanted, not a template variant, from a plugin not
-    //                excluded, and named by no input file (even a file switched off by RequiredMods)
+    //                excluded (and, with "Detect enchantments" off, named by no input file, even one switched off by
+    //                RequiredMods)
     //   Checks       playable, named, has an EditorID, enchantable (no MagicDisallowEnchanting / DaedricArtifact),
     //                model file present, every material keyword known and agreeing on one material, a weapon type /
-    //                armor slot and weight the input folders cover, the target folder has enchantments, and distributed
+    //                armor slot and weight, and distributed
+    //   Enchantments with "Detect enchantments" on: those the load order hands out on enchanted items of the item's kind
+    //                (LootDistribution.EnchantmentsFor), one group per kind; off: the input folder for its type and
+    //                tier, which it is added to, the way the hand-written files are organised
     public static class ItemDiscovery
     {
         private const string ReportFile = "discovered items.txt";
@@ -189,17 +192,23 @@ namespace EnchantedVariantsGenerator
             return named ? null : "name does not say its material (" + material + ")";
         }
 
-        public static void Run(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache,
-            string dataPath, List<InputThing> inputs, HashSet<FormKey> listedItems, Distribution distribution, LootDistribution? loot)
+        // Finds base items for detection ("Detect enchantments and items from the load order") and, with "Use input files"
+        // and its "add found items to their folders" on, for the input folders. Returns the detected groups: one per kind of
+        // item, with its items and detected enchantments.
+        public static List<InputThing> Run(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, Config config, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache,
+            string dataPath, List<InputThing> inputs, HashSet<FormKey> listedItems, Distribution distribution, LootDistribution loot)
         {
             string reportPath = Path.Combine(dataPath, ReportFile);
-            if (!config.DiscoverItems)
+            var detected = new Dictionary<string, InputThing>(StringComparer.Ordinal);
+            bool detect = config.DetectEnchantments;
+            bool toFolders = config.UseInputFiles && config.DiscoverItems;
+            if (!detect && !toFolders)
             {
                 if (File.Exists(reportPath)) File.Delete(reportPath);
-                return;
+                return new();
             }
 
-            var folders = inputs.ToDictionary(i => i.Folder, StringComparer.OrdinalIgnoreCase);
+            var folders = inputs.GroupBy(i => i.Folder, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
             var excludedPlugins = new HashSet<string>(config.DiscoverExcludedPlugins, StringComparer.OrdinalIgnoreCase);
             var excludedMaterials = new HashSet<string>(config.DiscoverExcludedMaterials, StringComparer.OrdinalIgnoreCase);
             var excludedItems = new HashSet<string>(config.DiscoverExcludedItems, StringComparer.OrdinalIgnoreCase);
@@ -234,7 +243,34 @@ namespace EnchantedVariantsGenerator
             // Whether the item's enchanted variants would reach loot: a vanilla enchanted list for its material and type or
             // slot (or, for armor, for its material in the other weight class) to file them beside. Not checked when the
             // patcher's distribution is switched off.
-            string? VariantsUndistributed(InputThing folder, IMajorRecordGetter item) => loot?.Problem(item);
+            string? VariantsUndistributed(IMajorRecordGetter item) => config.DistributeVariants ? loot.Problem(item) : null;
+
+            // The groups the item's variants are made in: its kind's detected enchantments, and the input folder for its type
+            // and tier (unless an input file names it already). Null when there is at least one, else why not.
+            string? Targets(IMajorRecordGetter item, string folderName, List<InputThing> targets)
+            {
+                string? why = null;
+                if (detect)
+                {
+                    if (loot.EnchantmentsFor(item) is { } kind)
+                    {
+                        if (!detected.TryGetValue(kind.Key, out var group))
+                        {
+                            detected[kind.Key] = group = new InputThing { Folder = kind.Label };
+                            foreach (var enchantment in kind.Enchantments) group.Enchantments.TryAdd(enchantment.EditorID, enchantment);
+                        }
+                        targets.Add(group);
+                    }
+                    else why = "no enchanted item of its kind in the load order to take enchantments from";
+                }
+                if (toFolders && !listedItems.Contains(item.FormKey))
+                {
+                    if (folderName == "") why ??= "no input folder for Ancient Nord bows";
+                    else if (FolderCheck(folderName, out var folder) is string reason) why ??= reason;
+                    else targets.Add(folder!);
+                }
+                return targets.Count > 0 ? null : why ?? "named by an input file";
+            }
 
             var added = new SortedDictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             var rejected = new SortedDictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -277,7 +313,7 @@ namespace EnchantedVariantsGenerator
 
             foreach (var weapon in state.LoadOrder.PriorityOrder.Weapon().WinningOverrides())
             {
-                if (!PluginAllowed(weapon.FormKey.ModKey) || listedItems.Contains(weapon.FormKey)) continue;
+                if (!PluginAllowed(weapon.FormKey.ModKey) || (!detect && listedItems.Contains(weapon.FormKey))) continue;
                 if (!weapon.Template.IsNull || !weapon.ObjectEffect.IsNull) continue;
                 var keywords = (weapon.Keywords ?? Array.Empty<IFormLinkGetter<IKeywordGetter>>()).Select(k => KeywordID(k.FormKey)).ToList();
                 if (!keywords.Any(k => k.Contains("Material", StringComparison.OrdinalIgnoreCase))) continue;
@@ -306,19 +342,19 @@ namespace EnchantedVariantsGenerator
                 string folderName = material.Tier == "AncientNord"
                     ? (bow ? "" : "weaponsAncientNord")
                     : (bow ? "WeaponBows" : "weapons") + material.Tier;
-                if (folderName == "") { Reject(weapon, name, "no input folder for Ancient Nord bows"); continue; }
-                reason = FolderCheck(folderName, out var folder);
+                var targets = new List<InputThing>();
+                reason = Targets(weapon, folderName, targets);
                 if (reason != null) { Reject(weapon, name, reason); continue; }
 
                 if (!distribution.IsDistributed(weapon.FormKey)) { Reject(weapon, name, "not distributed"); continue; }
-                reason = VariantsUndistributed(folder!, weapon);
+                reason = VariantsUndistributed(weapon);
                 if (reason != null) { Reject(weapon, name, reason); continue; }
-                Add(folder!, weapon, name, materialName, false);
+                foreach (var target in targets) Add(target, weapon, name, materialName, false);
             }
 
             foreach (var armor in state.LoadOrder.PriorityOrder.Armor().WinningOverrides())
             {
-                if (!PluginAllowed(armor.FormKey.ModKey) || listedItems.Contains(armor.FormKey)) continue;
+                if (!PluginAllowed(armor.FormKey.ModKey) || (!detect && listedItems.Contains(armor.FormKey))) continue;
                 if (!armor.TemplateArmor.IsNull || !armor.ObjectEffect.IsNull) continue;
                 var keywords = (armor.Keywords ?? Array.Empty<IFormLinkGetter<IKeywordGetter>>()).Select(k => KeywordID(k.FormKey)).ToList();
                 if (!keywords.Any(k => k.Contains("ArmorMaterial", StringComparison.OrdinalIgnoreCase))) continue;
@@ -352,20 +388,37 @@ namespace EnchantedVariantsGenerator
                     "ArmorHelmet" => "ArmorHelmets" + weight + material.Tier,
                     _ => "ArmorsCuirass" + weight + material.Tier,
                 };
-                reason = FolderCheck(folderName, out var folder);
+                var targets = new List<InputThing>();
+                reason = Targets(armor, folderName, targets);
                 if (reason != null) { Reject(armor, name, reason); continue; }
 
                 if (!distribution.IsDistributed(armor.FormKey)) { Reject(armor, name, "not distributed"); continue; }
-                reason = VariantsUndistributed(folder!, armor);
+                reason = VariantsUndistributed(armor);
                 if (reason != null) { Reject(armor, name, reason); continue; }
-                Add(folder!, armor, name, material.Name + " " + weight, true);
+                foreach (var target in targets) Add(target, armor, name, material.Name + " " + weight, true);
             }
 
             var report = new StringBuilder();
             report.AppendLine("Enchanted Variants Generator - discovered items, rewritten on every run.");
-            report.AppendLine("Items no input file names, found by keywords and distribution. To keep one out, add its EditorID to");
-            report.AppendLine("\"Discover items: excluded items\" in the patcher's settings; an input file naming an item always takes precedence.");
+            report.AppendLine("Base items found in the load order by keywords and distribution, added to"
+                + (detect ? " the group for their kind (with the enchantments the load order already hands out on its enchanted items)" : "")
+                + (detect && toFolders ? " and" : "") + (toFolders ? " the input folder for their type and tier (unless an input file names them)" : "") + ".");
+            report.AppendLine("To keep an item out, add its EditorID to \"Items: excluded items\" in the patcher's settings.");
             report.AppendLine();
+            if (detect)
+            {
+                report.AppendLine("== Detected enchantments (" + detected.Count + " kinds): tier, charge, EditorID (plugin), name around the base's");
+                foreach (var group in detected.Values.OrderBy(g => g.Folder, StringComparer.OrdinalIgnoreCase))
+                {
+                    report.AppendLine(group.Folder + ": " + group.Enchantments.Count + " enchantments, " + (group.Weapons.Count + group.Armors.Count) + " items");
+                    foreach (var e in group.Enchantments.Values)
+                    {
+                        report.AppendLine("  " + (e.Tier?.ToString("00") ?? "??") + "  " + (e.EnchantmentAmount?.ToString() ?? "-").PadLeft(5) + "  " + e.EditorID
+                            + " (" + e.Enchantment.FormKey.ModKey.FileName + ")  " + (e.Prefix != null || e.Suffix != null ? "\"" + e.Prefix + "~" + e.Suffix + "\"" : "(named as the load order's other items with it)"));
+                    }
+                }
+                report.AppendLine();
+            }
             report.AppendLine("== Added (" + addedCount + ")");
             foreach (var (folder, items) in added)
             {
@@ -380,8 +433,11 @@ namespace EnchantedVariantsGenerator
                 foreach (var item in items.OrderBy(i => i, StringComparer.OrdinalIgnoreCase)) report.AppendLine("  " + item);
             }
             File.WriteAllText(reportPath, report.ToString());
-            Console.WriteLine("Discover items: added " + addedCount + " items to " + added.Count + " input folders, left out "
-                + rejected.Values.Sum(l => l.Count) + "; details in " + reportPath);
+            int toKinds = detected.Values.Sum(g => g.Weapons.Count + g.Armors.Count);
+            Console.WriteLine("Items: " + (detect ? toKinds + " added to " + detected.Count + " kinds with detected enchantments" : "")
+                + (detect && toFolders ? ", " : "") + (toFolders ? (addedCount - toKinds) + " added to input folders" : "")
+                + ", left out " + rejected.Values.Sum(l => l.Count) + "; details in " + reportPath);
+            return detected.Values.ToList();
         }
     }
 
