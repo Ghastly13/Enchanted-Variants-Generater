@@ -273,6 +273,8 @@ namespace EnchantedVariantsGenerator
             }
 
             var added = new SortedDictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            // Per group (detected kind or input folder): its items as "weapon/armor EditorID "name" [material] plugin"
+            var groupItems = new Dictionary<InputThing, List<string>>();
             var rejected = new SortedDictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             int addedCount = 0;
             void Reject(IMajorRecordGetter item, string? name, string reason)
@@ -286,8 +288,11 @@ namespace EnchantedVariantsGenerator
                 var json = new ItemJSON { EditorID = item.EditorID, FormKey = item.FormKey.ToString() };
                 var target = armor ? folder.Armors : folder.Weapons;
                 if (!target.TryAdd(item.EditorID!, json)) return;
+                string line = item.EditorID + " \"" + name + "\" [" + material + "] " + item.FormKey.ModKey.FileName;
                 if (!added.TryGetValue(folder.Folder, out var list)) added[folder.Folder] = list = new();
-                list.Add(item.EditorID + " \"" + name + "\" [" + material + "] " + item.FormKey.ModKey.FileName);
+                list.Add(line);
+                if (!groupItems.TryGetValue(folder, out var items)) groupItems[folder] = items = new();
+                items.Add((armor ? "armor " : "weapon ") + line);
                 addedCount++;
             }
 
@@ -398,6 +403,12 @@ namespace EnchantedVariantsGenerator
                 foreach (var target in targets) Add(target, armor, name, material.Name + " " + weight, true);
             }
 
+            // Kinds every item of which was then left out (not distributed, ...) make nothing
+            var kinds = detected.Values.Where(g => groupItems.ContainsKey(g)).OrderBy(g => g.Folder, StringComparer.OrdinalIgnoreCase).ToList();
+            static string EnchantmentLine(EnchantmentInfo e) =>
+                (e.Tier?.ToString("00") ?? "??") + "  " + (e.EnchantmentAmount?.ToString() ?? "-").PadLeft(5) + "  " + e.EditorID
+                + " (" + e.Enchantment.FormKey.ModKey.FileName + ")  " + (e.Prefix != null || e.Suffix != null ? "\"" + e.Prefix + "~" + e.Suffix + "\"" : "(named as the load order's other items with it)");
+
             var report = new StringBuilder();
             report.AppendLine("Enchanted Variants Generator - discovered items, rewritten on every run.");
             report.AppendLine("Base items found in the load order by keywords and distribution, added to"
@@ -407,15 +418,11 @@ namespace EnchantedVariantsGenerator
             report.AppendLine();
             if (detect)
             {
-                report.AppendLine("== Detected enchantments (" + detected.Count + " kinds): tier, charge, EditorID (plugin), name around the base's");
-                foreach (var group in detected.Values.OrderBy(g => g.Folder, StringComparer.OrdinalIgnoreCase))
+                report.AppendLine("== Detected enchantments (" + kinds.Count + " kinds): tier, charge, EditorID (plugin), name around the base's");
+                foreach (var group in kinds)
                 {
                     report.AppendLine(group.Folder + ": " + group.Enchantments.Count + " enchantments, " + (group.Weapons.Count + group.Armors.Count) + " items");
-                    foreach (var e in group.Enchantments.Values)
-                    {
-                        report.AppendLine("  " + (e.Tier?.ToString("00") ?? "??") + "  " + (e.EnchantmentAmount?.ToString() ?? "-").PadLeft(5) + "  " + e.EditorID
-                            + " (" + e.Enchantment.FormKey.ModKey.FileName + ")  " + (e.Prefix != null || e.Suffix != null ? "\"" + e.Prefix + "~" + e.Suffix + "\"" : "(named as the load order's other items with it)"));
-                    }
+                    foreach (var e in group.Enchantments.Values) report.AppendLine("  " + EnchantmentLine(e));
                 }
                 report.AppendLine();
             }
@@ -433,11 +440,24 @@ namespace EnchantedVariantsGenerator
                 foreach (var item in items.OrderBy(i => i, StringComparer.OrdinalIgnoreCase)) report.AppendLine("  " + item);
             }
             File.WriteAllText(reportPath, report.ToString());
-            int toKinds = detected.Values.Sum(g => g.Weapons.Count + g.Armors.Count);
-            Console.WriteLine("Items: " + (detect ? toKinds + " added to " + detected.Count + " kinds with detected enchantments" : "")
+
+            // The same in the log: each detected kind with its items and enchantments
+            int toKinds = kinds.Sum(g => g.Weapons.Count + g.Armors.Count);
+            if (detect)
+            {
+                Console.WriteLine("Detected " + kinds.Count + " kinds of items (" + toKinds + " items), each with the enchantments the load order hands out on its");
+                Console.WriteLine("enchanted items. Enchantments: tier, charge, EditorID (plugin), name around the base's");
+                foreach (var group in kinds)
+                {
+                    Console.WriteLine("  " + group.Folder + ": " + (group.Weapons.Count + group.Armors.Count) + " items, " + group.Enchantments.Count + " enchantments");
+                    foreach (var item in groupItems[group].OrderBy(i => i, StringComparer.OrdinalIgnoreCase)) Console.WriteLine("    " + item);
+                    foreach (var e in group.Enchantments.Values) Console.WriteLine("    enchantment " + EnchantmentLine(e));
+                }
+            }
+            Console.WriteLine("Items: " + (detect ? toKinds + " added to " + kinds.Count + " kinds with detected enchantments" : "")
                 + (detect && toFolders ? ", " : "") + (toFolders ? (addedCount - toKinds) + " added to input folders" : "")
                 + ", left out " + rejected.Values.Sum(l => l.Count) + "; details in " + reportPath);
-            return detected.Values.ToList();
+            return kinds;
         }
     }
 
