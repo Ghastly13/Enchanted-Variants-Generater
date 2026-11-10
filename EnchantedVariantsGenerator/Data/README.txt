@@ -14,8 +14,8 @@ Where items and enchantments come from
   vanilla enchanted lists its variants go in: an Iron sword (vanilla, Heavy Armory's, Animated Armoury's) gets every
   enchantment vanilla, Summermyst and Thaumaturgy put on the Iron swords in those lists, with the tier, charge and
   name they give it there. Light Daedric armor follows heavy Daedric. Ancient Nord weapons follow the Draugr loadout
-  lists (frost) and the game's own Ancient Nord variants of their type (fire on honed greatswords: "of Embers",
-  "of Burning"). A kind with no enchanted items to go by (Imperial armor) gets nothing.
+  lists (frost; the honed greatsword's fire variants are in no list, only on Red Eagle and in Labyrinthian, so they
+  are not used). A kind with no enchanted items in those lists (Imperial armor) gets nothing.
 
   Input files
   An "input" folder here, one subfolder per group: every enchantment file in a subfolder applies to every weapon/armor

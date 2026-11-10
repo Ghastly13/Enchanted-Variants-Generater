@@ -38,7 +38,7 @@ namespace EnchantedVariantsGenerator
         // pair is made once either way)
         [SynthesisOrder]
         [SynthesisSettingName("Detect enchantments and items from the load order")]
-        [SynthesisTooltip("Find the base weapons and armor in the load order (see \"Items: ...\") and give each the enchantments the load order already hands out on enchanted items of its kind, read from the vanilla enchanted lists its variants go in: an Iron sword gets what vanilla, Summermyst and Thaumaturgy put on Iron swords, at the same tier, charge and name. Light Daedric armor follows heavy Daedric; Ancient Nord weapons follow the Draugr loadout lists and the game's own Ancient Nord variants (frost, and fire on honed greatswords). Needs no input files. Every kind and its enchantments are listed in \"discovered items.txt\".")]
+        [SynthesisTooltip("Find the base weapons and armor in the load order (see \"Items: ...\") and give each the enchantments the load order already hands out on enchanted items of its kind, read from the vanilla enchanted lists its variants go in: an Iron sword gets what vanilla, Summermyst and Thaumaturgy put on Iron swords, at the same tier, charge and name. Light Daedric armor follows heavy Daedric; Ancient Nord weapons follow the Draugr loadout lists (frost). Needs no input files. Every kind and its enchantments are listed in \"discovered items.txt\".")]
         public bool DetectEnchantments { get; set; } = true;
 
         [SynthesisOrder]

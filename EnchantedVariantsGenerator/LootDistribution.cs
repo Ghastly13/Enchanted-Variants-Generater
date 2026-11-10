@@ -418,9 +418,10 @@ namespace EnchantedVariantsGenerator
 
         // The enchantments the load order already hands out on enchanted items of the base's kind, from the lists its
         // variants would go in: its own variants' lists, else its material and type or slot, else (armor) the same material
-        // in the other weight class, else (Ancient Nord) the Draugr loadout lists for its material and weapon group, plus
-        // the game's own enchanted Ancient Nord weapons of its material and type. Each keeps the tier, charge and name those
-        // items give it. Null when no such item exists.
+        // in the other weight class, else (Ancient Nord) the Draugr loadout lists for its material and weapon group. Each
+        // keeps the tier, charge and name those items give it. Null when no such item exists. Only loot counts: the honed
+        // Ancient Nord greatsword's fire variants (Red Eagle's "of Embers", one placed "of Burning") are in no list, so
+        // Ancient Nord gets frost only.
         public DetectedKind? EnchantmentsFor(IMajorRecordGetter baseItem)
         {
             string? itemClass = ClassOf(baseItem);
@@ -429,16 +430,10 @@ namespace EnchantedVariantsGenerator
             List<(SourceItem Item, int Tier)> sources;
             if (!armor && DraugrClass(itemClass) is (string material, string group))
             {
-                var listed = _draugrLists.Where(d => d.Group == group).SelectMany(d => d.Items).Where(i => i.Material == material).Select(i => i.Item).ToList();
-                // The game's own variants no loadout list holds: the honed greatsword's fire (Red Eagle's "of Embers", one
-                // placed "of Burning"). They make the type a kind of its own.
-                var listedEnchantments = listed.Select(i => i.Enchantment).ToHashSet();
-                var own = GameAncientNordVariants(itemClass!).Where(i => !listedEnchantments.Contains(i.Enchantment)).ToList();
-                string type = itemClass!.Split(' ')[1];
-                key = "Draugr|" + material + "|" + group + (own.Count > 0 ? "|" + type : "");
-                label = (material == "DraugrHoned" ? "honed " : "") + "Ancient Nord " + (own.Count > 0 ? type.ToLowerInvariant() + "s (Draugr loadout lists and the game's own variants)" : GroupName(group) + " weapons (Draugr loadout lists)");
+                key = "Draugr|" + material + "|" + group;
+                label = (material == "DraugrHoned" ? "honed " : "") + "Ancient Nord " + GroupName(group) + " weapons (Draugr loadout lists)";
                 if (_detected.TryGetValue(key, out var cached)) return cached;
-                sources = listed.Concat(own).Select(i => (i, i.Tier ?? 0)).ToList();
+                sources = _draugrLists.Where(d => d.Group == group).SelectMany(d => d.Items).Where(i => i.Material == material).Select(i => (i.Item, i.Item.Tier ?? 0)).ToList();
             }
             else if (Family(baseItem, itemClass) is { Count: > 0 } family)
             {
@@ -492,27 +487,6 @@ namespace EnchantedVariantsGenerator
                 : new DetectedKind(key, label, enchantments.OrderBy(e => e.Tier ?? 0).ThenBy(e => e.EditorID, StringComparer.OrdinalIgnoreCase).ToList());
             _detected[key] = kind;
             return kind;
-        }
-
-        private Dictionary<string, List<SourceItem>>? _gameAncientNord;
-
-        // Playable enchanted Ancient Nord weapons the base game or Creation Club defines, by class ("DraugrHoned Greatsword"),
-        // wherever the game puts them
-        private List<SourceItem> GameAncientNordVariants(string itemClass)
-        {
-            if (_gameAncientNord == null)
-            {
-                _gameAncientNord = new(StringComparer.OrdinalIgnoreCase);
-                foreach (var w in _state.LoadOrder.PriorityOrder.Weapon().WinningOverrides())
-                {
-                    if (w.Template.IsNull || w.ObjectEffect.IsNull || !IsBaseGame(w.FormKey.ModKey)) continue;
-                    if (w.Data != null && w.Data.Flags.HasFlag(WeaponData.Flag.NonPlayable)) continue;
-                    if (!_linkCache.TryResolve<IWeaponGetter>(w.Template.FormKey, out var b) || ClassOf(b) is not string c || DraugrClass(c) == null) continue;
-                    if (!_gameAncientNord.TryGetValue(c, out var items)) _gameAncientNord[c] = items = new();
-                    items.Add(new SourceItem(w.FormKey, b, w.ObjectEffect.FormKey, TierOf(OriginalItemEditorID(w.FormKey, true) ?? w.EditorID), w.EnchantmentAmount, w.Name?.String));
-                }
-            }
-            return _gameAncientNord.TryGetValue(itemClass, out var found) ? found : new();
         }
 
         // The enchantment's EditorID in the plugin that defines it (Thaumaturgy renames vanilla ones), so generated
