@@ -32,8 +32,8 @@ namespace EnchantedVariantsGenerator
     //             Draugr loadout lists (LItemDraugr02BossWeapon1HMagic, ...), one per Draugr rank and weapon group, each
     //             holding every type of the group on a ladder of levels by tier. The new list holds the group's variants at
     //             the levels that ladder gives their material and tier, and goes in as often as one vanilla weapon does.
-    // The lists are read as the game holds them after SkyPatcher (RuntimeLists), and the INI goes in a folder that sorts
-    // after other mods', so its additions land on the finished lists.
+    // The lists are read as the game holds them after SkyPatcher (RuntimeLists), and the INI is nested deeper than any
+    // other mod's (SkyPatcher applies shallow folders first, see SkyPatcherOrder), so its additions land on the finished lists.
     public class LootDistribution
     {
         public const string ListSuffix = "_EVG";
@@ -107,6 +107,39 @@ namespace EnchantedVariantsGenerator
             public string Group = "";
             public readonly Dictionary<(string Material, int Tier), List<(short Level, int Count)>> Ladder = new();
             public readonly List<(string Material, SourceItem Item)> Items = new();
+            // Set for a list the load order lacks and this patcher makes in its place (WACCF's bow list): where it goes, and
+            // its flags; FormKey is then null
+            public List<(FormKey List, string EditorID, short Level)>? Placements;
+            public LeveledItem.Flag Flags;
+        }
+
+        // WACCF's LItemDraugr02BossWeaponBowMagic, made when no Draugr bow list exists: the frost Ancient Nord bows on the
+        // same ladder (per bow: Ancient Nord tier 1 four times at 1, tier 2 at 6-9, tier 3 at 13-16; honed tier 1 at 6-9,
+        // tier 2 at 13-16, tier 3 at 21-24), in the Draugr bow lists where Open World Loot's WACCF patch puts WACCF's
+        private const string WaccfBowList = "LItemDraugr02BossWeaponBowMagic";
+        private static readonly (string List, short Level)[] WaccfBowListPlacements = { ("LItemDraugr02WeaponBowSublist", 16), ("LItemDraugr05WeaponBowSublist", 1) };
+
+        private void AddWaccfBowListCopy()
+        {
+            if (_draugrLists.Any(d => d.Group == "Bow")) return;
+            var placements = WaccfBowListPlacements.Select(p => (Found: _lists.ListByEditorID(p.List), p.List, p.Level))
+                .Where(p => p.Found != null).Select(p => (p.Found!.Value, p.List, p.Level)).ToList();
+            if (placements.Count == 0) return;
+            var list = new DraugrList
+            {
+                EditorID = WaccfBowList,
+                Group = "Bow",
+                Placements = placements,
+                Flags = LeveledItem.Flag.CalculateFromAllLevelsLessThanOrEqualPlayer | LeveledItem.Flag.CalculateForEachItemInCount | LeveledItem.Flag.SpecialLoot,
+            };
+            static List<(short, int)> Levels(int count, params short[] levels) => levels.Select(l => (l, count)).ToList();
+            list.Ladder[("Draugr", 1)] = Levels(4, 1);
+            list.Ladder[("Draugr", 2)] = Levels(1, 6, 7, 8, 9);
+            list.Ladder[("Draugr", 3)] = Levels(1, 13, 14, 15, 16);
+            list.Ladder[("DraugrHoned", 1)] = Levels(1, 6, 7, 8, 9);
+            list.Ladder[("DraugrHoned", 2)] = Levels(1, 13, 14, 15, 16);
+            list.Ladder[("DraugrHoned", 3)] = Levels(1, 21, 22, 23, 24);
+            _draugrLists.Add(list);
         }
 
         // The variants this run puts in one Draugr loadout list
@@ -140,6 +173,7 @@ namespace EnchantedVariantsGenerator
             var result = new LootDistribution(state, linkCache, lists);
             result.FindLeaves();
             result.FindDraugrLists();
+            result.AddWaccfBowListCopy();
             Console.WriteLine("Distribution: " + result._leaves.Count(l => l.Armor) + " vanilla enchanted armor lists, " + result._leaves.Count(l => !l.Armor)
                 + " weapon lists and " + result._draugrLists.Count + " Draugr loadout lists, read after " + lists.IniLines + " SkyPatcher leveled-list lines");
             return result;
@@ -431,9 +465,13 @@ namespace EnchantedVariantsGenerator
             if (!armor && DraugrClass(itemClass) is (string material, string group))
             {
                 key = "Draugr|" + material + "|" + group;
-                label = (material == "DraugrHoned" ? "honed " : "") + "Ancient Nord " + GroupName(group) + " weapons (Draugr loadout lists)";
+                // Lists of the group holding no enchanted item (the copy of WACCF's bow list): the material's one-handed
+                // ones give the enchantments, vanilla's frost, as WACCF's bows have
+                bool borrowed = !_draugrLists.Any(d => d.Group == group && d.Items.Any(i => i.Material == material));
+                label = (material == "DraugrHoned" ? "honed " : "") + "Ancient Nord " + GroupName(group) + " weapons ("
+                    + (borrowed ? "copy of WACCF's " + WaccfBowList + ", enchantments of the one-handed Draugr lists)" : "Draugr loadout lists)");
                 if (_detected.TryGetValue(key, out var cached)) return cached;
-                sources = _draugrLists.Where(d => d.Group == group).SelectMany(d => d.Items).Where(i => i.Material == material).Select(i => (i.Item, i.Item.Tier ?? 0)).ToList();
+                sources = _draugrLists.Where(d => d.Group == (borrowed ? "1H" : group)).SelectMany(d => d.Items).Where(i => i.Material == material).Select(i => (i.Item, i.Item.Tier ?? 0)).ToList();
             }
             else if (Family(baseItem, itemClass) is { Count: > 0 } family)
             {
@@ -531,17 +569,21 @@ namespace EnchantedVariantsGenerator
         // when nothing hands it out yet
         public void Run(Config config, string dataPath, List<GeneratedVariant> variants, Distribution distribution)
         {
-            string iniFolder = Path.Combine(_state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher", "leveledList", IniFolder);
-            string iniPath = Path.Combine(iniFolder, _state.PatchMod.ModKey.FileName + ".ini");
+            // SkyPatcher applies the INIs of a type folder shallowest folder first (OWL\Main\... runs after WACCF\...), so the
+            // INI goes one folder deeper than any other mod's: its additions then land after every clear and removal
+            string leveledList = Path.Combine(_state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher", "leveledList");
+            string iniName = _state.PatchMod.ModKey.FileName + ".ini";
+            string iniPath = SkyPatcherOrder.LastPath(leveledList, IniFolder, iniName);
+            string iniFolder = Path.GetDirectoryName(iniPath)!;
             string reportPath = Path.Combine(dataPath, ReportFile);
             // Earlier versions filed weapons into Open World Loot's lists, through INIs that now point at lists OWL no longer has
             foreach (var legacy in new[] { "EnchantedVariantsGenerator", "EnchantedVariantsGenerater" })
             {
-                Program.DeleteLegacyOutput(Path.Combine(_state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher", "leveledList", legacy, "Open World Loot.esp.ini"));
+                Program.DeleteLegacyOutput(Path.Combine(leveledList, legacy, "Open World Loot.esp.ini"));
             }
             if (!config.DistributeVariants)
             {
-                DeleteIfPresent(iniPath);
+                SkyPatcherOrder.RemoveOtherCopies(leveledList, IniFolder, iniName, null);
                 DeleteIfPresent(reportPath);
                 return;
             }
@@ -734,8 +776,20 @@ namespace EnchantedVariantsGenerator
                     entries = n.Items.SelectMany(i => d.Ladder[i.Value].SelectMany(l => Enumerable.Repeat((i.Key, l.Level), l.Count / divisor))).ToList();
                 }
                 string id = d.EditorID + ListSuffix;
-                var (record, made) = WriteList(config, id, entries, _lists.Record(d.FormKey).Flags);
+                var (record, made) = WriteList(config, id, entries, d.Placements != null ? d.Flags : _lists.Record(d.FormKey).Flags);
                 listCount += made;
+
+                // The copy of WACCF's bow list goes in once where WACCF's would be
+                if (d.Placements != null)
+                {
+                    foreach (var (list, listID, level) in d.Placements)
+                    {
+                        IniAdd(list, record.FormKey, level, listID + " <- " + id + " (" + n.Items.Count + "), in place of WACCF's " + d.EditorID);
+                    }
+                    draugrReport.Add("  " + id + " (" + n.Items.Count + ") -> " + string.Join(", ", d.Placements.Select(p => p.EditorID + " at level " + p.Level))
+                        + " (no Draugr bow list in the load order: a copy of WACCF's " + d.EditorID + ")");
+                    continue;
+                }
 
                 var share = n.Items.Values.Distinct().GroupBy(k => k.Material)
                     .SelectMany(g => g.SelectMany(k => d.Ladder[k])).OrderBy(l => l.Level).ToList();
@@ -897,7 +951,7 @@ namespace EnchantedVariantsGenerator
             LeveledItem list = config.CheckExistingGenerated && _linkCache.TryResolve<ILeveledItemGetter>(editorID, out var existing)
                 ? existing.DeepCopy()
                 : new LeveledItem(_state.PatchMod, editorID);
-            list.Flags = flags & (LeveledItem.Flag.CalculateFromAllLevelsLessThanOrEqualPlayer | LeveledItem.Flag.CalculateForEachItemInCount | LeveledItem.Flag.UseAll);
+            list.Flags = flags & (LeveledItem.Flag.CalculateFromAllLevelsLessThanOrEqualPlayer | LeveledItem.Flag.CalculateForEachItemInCount | LeveledItem.Flag.UseAll | LeveledItem.Flag.SpecialLoot);
             list.ChanceNone = default;
             list.Entries = new Noggog.ExtendedList<LeveledItemEntry>();
             return list;

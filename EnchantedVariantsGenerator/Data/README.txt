@@ -31,8 +31,12 @@ Distributed items
   For each vanilla enchanted sublist a variant belongs in, such as SublistEnchArmorIronCuirass01 or
   SublistEnchIronSwordFire, the patcher makes <that list>_EVG holding the variants at the level the vanilla list gives
   the same tier, and adds it once to the vanilla list through
-  SKSE\Plugins\SkyPatcher\leveledList\zz Enchanted Variants Generator\<output plugin>.ini. Anything that draws from the
-  vanilla lists, Open World Loot included, then hands them out.
+  SKSE\Plugins\SkyPatcher\leveledList\zz Enchanted Variants Generator\zz\...\<output plugin>.ini. Anything that draws
+  from the vanilla lists, Open World Loot included, then hands them out.
+  SkyPatcher applies the INIs of a folder by how deeply they are nested, shallowest first (WACCF's
+  leveledList\Weapons Armor Clothing and Clutter Fixes\... runs before OWL's leveledList\OWL\Main\...), then by path.
+  So the patcher nests its INIs (this one, and its weapon and armor name INIs) in "zz" folders one level deeper than
+  any other mod's INI in the same folder: they apply last, after every clear and removal, whatever is installed.
     Armor     the tier list for the base's material, weight class and slot (where its own vanilla variants are, if it
               has any), at the enchantment's tier or the nearest the material has.
     Weapons   the material and type's list for the enchantment's effect (Fire, Frost, ...). Where the material and type
@@ -42,6 +46,10 @@ Distributed items
               (one-handed, two-handed, bow), each holding the group's types on a ladder of levels by tier. Each variant
               goes in every list of its group whose ladder has its material and tier, at those levels, and the new list
               goes in as often as one vanilla weapon of each material does.
+              Bows: the bow list is WACCF's (LItemDraugr02BossWeaponBowMagic). Without it, the patcher makes a copy,
+              LItemDraugr02BossWeaponBowMagic_EVG: the vanilla Ancient Nord bow and supple bow with frost 1-3 on WACCF's
+              ladder and flags, added once to LItemDraugr02WeaponBowSublist at level 16 and LItemDraugr05WeaponBowSublist
+              at level 1, where Open World Loot's WACCF patch puts WACCF's.
     Other weight class   armor in a weight class vanilla never enchants for its material (light Daedric, heavy Glass)
               follows that material's lists in the other class, placed in the matching lists for its own class; lists in
               between, such as the Daedric wrappers, are copied for the new class.

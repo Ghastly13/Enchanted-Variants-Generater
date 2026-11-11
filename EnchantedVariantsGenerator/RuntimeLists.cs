@@ -11,7 +11,8 @@ using Mutagen.Bethesda.Synthesis;
 namespace EnchantedVariantsGenerator
 {
     // Every leveled item list as the game holds it once SkyPatcher has run: the winning record's entries, then each active
-    // SkyPatcher leveledList INI line (clear, removeFromLLs, addToLLs, addOnceToLLs) in the order SkyPatcher reads the files.
+    // SkyPatcher leveledList INI line (clear, removeFromLLs, addToLLs, addOnceToLLs) in the order SkyPatcher applies the
+    // files (SkyPatcherOrder: shallowest folders first).
     // Open World Loot, for one, clears and rebuilds vanilla lists this way, so where a list really sits is only known after
     // the replay. The patcher's own INIs are left out: this run rewrites them.
     public class RuntimeLists
@@ -90,10 +91,9 @@ namespace EnchantedVariantsGenerator
             string root = Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher", "leveledList");
             if (!Directory.Exists(root)) return;
             var active = new HashSet<string>(state.LoadOrder.Where(l => l.Value.Enabled).Select(l => l.Key.FileName.String), StringComparer.OrdinalIgnoreCase);
-            var files = Directory.EnumerateFiles(root, "*.ini", SearchOption.AllDirectories)
-                .Select(f => (Full: f, Relative: Path.GetRelativePath(root, f)))
+            // SkyPatcher's order: shallowest folders first, then by path (WACCF's INI runs before OWL\Main\...)
+            var files = SkyPatcherOrder.InApplyOrder(root)
                 .Where(f => !f.Relative.Split(Path.DirectorySeparatorChar).Any(part => OwnFolders.Contains(part, StringComparer.OrdinalIgnoreCase)))
-                .OrderBy(f => f.Relative, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             bool Exists(FormKey fk) => _records.ContainsKey(fk) || linkCache.TryResolve<ISkyrimMajorRecordGetter>(fk, out _);
