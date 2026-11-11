@@ -13,7 +13,9 @@ Where items and enchantments come from
   and gives each the enchantments the load order already hands out on enchanted items of its kind, read from the
   vanilla enchanted lists its variants go in: an Iron sword (vanilla, Heavy Armory's, Animated Armoury's) gets every
   enchantment vanilla, Summermyst and Thaumaturgy put on the Iron swords in those lists, with the tier, charge and
-  name they give it there. Light Daedric armor follows heavy Daedric. Ancient Nord weapons follow the Draugr loadout
+  name they give it there. Armor in a weight class vanilla never makes for its material (heavy Elven, heavy Glass, light
+  Daedric) is found by its material keyword all the same and follows that material in the other class: heavy Elven
+  boots get light Elven boots' enchantments and go where those are, mirrored into the heavy lists. Ancient Nord weapons follow the Draugr loadout
   lists (frost; the honed greatsword's fire variants are in no list, only on Red Eagle and in Labyrinthian, so they
   are not used). A kind with no enchanted items in those lists (Imperial armor) gets nothing.
 

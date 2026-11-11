@@ -379,6 +379,14 @@ namespace EnchantedVariantsGenerator
                 if (slots.Count != 1) { Reject(armor, name, slots.Count == 0 ? "no armor slot keyword" : "several armor slot keywords"); continue; }
 
                 var (material, why) = MaterialOf(keywords, heavy ? HeavyArmorMaterials : LightArmorMaterials);
+                // A material vanilla only makes in the other weight class (heavy Elven, heavy Glass, light Daedric): its
+                // keyword is in the other class's table. Its variants follow that material's lists in the other class.
+                if (material == null && why!.StartsWith("unknown material keyword", StringComparison.Ordinal))
+                {
+                    var (either, eitherWhy) = MaterialOf(keywords, HeavyArmorMaterials.Concat(LightArmorMaterials).ToArray());
+                    if (either != null) material = either;
+                    else why = eitherWhy;
+                }
                 if (material == null) { Reject(armor, name, why! + (heavy ? " (heavy)" : " (light)")); continue; }
                 if (excludedMaterials.Contains(material.Name)) { Reject(armor, name, "excluded material " + material.Name); continue; }
                 reason = NameDisagrees(name!, material.Name);
