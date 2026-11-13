@@ -99,7 +99,7 @@ namespace EnchantedVariantsGenerator
 
         [SynthesisOrder]
         [SynthesisSettingName("Names: merge Paths of Empyrean and SkyPatcher renames")]
-        [SynthesisTooltip("Where both rename an item, merge them (\"Ancient Nord Supple Shortbow\") and write the result to both, since their run order is unknown.")]
+        [SynthesisTooltip("Where both rename an item, merge them (\"Ancient Nord Supple Shortbow\") and write the result to SkyPatcher, which applies after Paths of Empyrean and so wins. Off: SkyPatcher's name alone is shown.")]
         public bool ReconcileRuntimeRenames { get; set; } = true;
     }
 
