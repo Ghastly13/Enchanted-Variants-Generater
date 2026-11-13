@@ -831,6 +831,7 @@ namespace EnchantedVariantsGenerator
             List<InputThing> inputs = GetInputs(state, config, dataPath, listedItems);
 
             var linkcache = state.LoadOrder.ToImmutableLinkCache();
+            VaerPatch.Run(state, linkcache, config);
             ItemNames.Build(state, linkcache, config);
             ItemNames.WriteRuntimeNameOverrides(state, linkcache, config);
 

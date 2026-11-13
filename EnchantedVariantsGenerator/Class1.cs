@@ -77,6 +77,11 @@ namespace EnchantedVariantsGenerator
         public List<string> DiscoverExcludedItems { get; set; } = new();
 
         [SynthesisOrder]
+        [SynthesisSettingName("V.A.E.R.: keep its visuals against the load order")]
+        [SynthesisTooltip("When V.A.E.R. - Visual Animated Enchants Reborn (VAEReborn.esp, either edition) is installed: for every magic effect, enchantment and weapon it overrides, write the winning version with V.A.E.R.'s changes on top (its enchant art and shaders, its animated effects on unique enchantments, its enchantments on unique weapons). Mods later in the load order (Thaumaturgy, Summermyst, ...) no longer erase its visuals, and its own copies no longer undo fixes from mods before it (USSEP, ...). Every patched record is listed in the log.")]
+        public bool PatchVaer { get; set; } = true;
+
+        [SynthesisOrder]
         [SynthesisSettingName("Names: use SkyPatcher and Paths of Empyrean renames")]
         [SynthesisTooltip("Name items after the names they get at runtime from SkyPatcher INIs (e.g. WACCF's) and Paths of Empyrean's SKSE\\Plugins\\POE\\Weapon INIs, not only their plugin names.")]
         public bool ApplySkyPatcherNames { get; set; } = true;

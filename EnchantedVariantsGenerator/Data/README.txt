@@ -58,3 +58,15 @@ Distributed items
   The input files' LeveledLists entries now only give each enchantment's tier (the digits of its first non-NPC
   suffix). Each run writes "distributed items.txt" here: every list made and where it went, and every variant left
   out with the reason.
+
+V.A.E.R. - Visual Animated Enchants Reborn
+  When VAEReborn.esp is in the load order (either edition: the Creation Club one or the Vanilla one, whichever MO2
+  serves), setting "V.A.E.R.: keep its visuals against the load order" patches it. V.A.E.R. overrides records built
+  against the base game and Creation Club only, so mods later in the load order (Thaumaturgy, Summermyst, CACO) erase
+  its visuals, and where it wins, its copies undo fixes from mods before it (USSEP, ...). For every record it overrides,
+  the patch writes the highest-priority version that is not V.A.E.R.'s with V.A.E.R.'s own changes on top:
+    magic effects   its enchant art and enchant shader (and hit and casting visuals, should it set any)
+    enchantments    its animated copies of the effects, swapped in where the original ones are, keeping magnitudes
+    weapons         its enchantment
+  Records where nothing would be lost are left alone. Every patched record is listed in the Synthesis log. Since the
+  generated variants use the same enchantments, they get V.A.E.R.'s visuals too.
