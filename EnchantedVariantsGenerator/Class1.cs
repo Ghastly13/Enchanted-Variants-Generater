@@ -68,8 +68,8 @@ namespace EnchantedVariantsGenerator
 
         [SynthesisOrder]
         [SynthesisSettingName("Items: excluded plugins")]
-        [SynthesisTooltip("Plugins whose items are never found in the load order. Leave the base game in only when input files cover its items: with detection on, vanilla items get the enchantments other mods put on their kind (variants that already exist are skipped as duplicates).")]
-        public List<string> DiscoverExcludedPlugins { get; set; } = new();
+        [SynthesisTooltip("Plugins whose items are never found in the load order. By default the city overhauls Capital Whiterun Expansion (SurWR.esp) and Capital Windhelm Expansion (WindhelmSSE.esp), whose items are their NPCs' copies of existing gear. Leave the base game in only when input files cover its items: with detection on, vanilla items get the enchantments other mods put on their kind (variants that already exist are skipped as duplicates).")]
+        public List<string> DiscoverExcludedPlugins { get; set; } = new() { "SurWR.esp", "WindhelmSSE.esp" };
 
         [SynthesisOrder]
         [SynthesisSettingName("Items: include Creation Club items")]
