@@ -26,13 +26,18 @@ namespace EnchantedVariantsGenerator
 
         [SynthesisOrder]
         [SynthesisSettingName("Distribute variants beside their vanilla twins")]
-        [SynthesisTooltip("Hand the variants out as loot: each goes in a list of its own (<vanilla list>_EVG) added to the vanilla enchanted list its twin is in (e.g. SublistEnchArmorIronCuirass01, SublistEnchIronSwordFire), at the level that list gives the same tier, through a SkyPatcher INI applied after other mods'. Armor in a weight class vanilla never enchants for its material (light Daedric) follows that material's lists in the other class, placed in the matching lists for its own class. Ancient Nord weapons go in the Draugr loadout lists (LItemDraugr02BossWeapon1HMagic, ...), as vanilla's do. Anything drawing from the vanilla lists, Open World Loot included, then hands them out. Every placement is written to \"distributed items.txt\" in the patcher's data folder.")]
+        [SynthesisTooltip("Hand the variants out as loot: each goes in a list of its own (<vanilla list>_EVG) added to the vanilla enchanted list its twin is in (e.g. SublistEnchArmorIronCuirass01, SublistEnchIronSwordFire), at the level that list gives the same tier, through a SkyPatcher INI applied after other mods'. Armor in a weight class vanilla never enchants for its material (light Daedric) follows that material's lists in the other class, placed in the matching lists for its own class. Ancient Nord weapons go in the Draugr loadout lists (LItemDraugr02BossWeapon1HMagic, ...), as vanilla's do. Items in \"Only in Dragonborn (DLC2) lists\" go in DLC2 lists only. Anything drawing from the vanilla lists, Open World Loot included, then hands them out. Every placement is written to \"distributed items.txt\" in the patcher's data folder.")]
         public bool DistributeVariants { get; set; } = true;
 
         [SynthesisOrder]
         [SynthesisSettingName("Add skipped duplicates to leveled lists")]
         [SynthesisTooltip("Distribute the existing variant in place of the skipped one, when no leveled list holds it yet.")]
         public bool AddDuplicatesToLeveledLists { get; set; } = true;
+
+        [SynthesisOrder]
+        [SynthesisSettingName("Only in Dragonborn (DLC2) lists")]
+        [SynthesisTooltip("Plugins (or base item EditorIDs) whose variants are handed out on Solstheim only, such as the Creation Club's Netch Leather. Where their vanilla twins' list is one the rest of Skyrim uses too (SublistEnchArmorLeatherCuirass01), they go in a list of their own (DLC2SublistEnchArmorLeatherCuirass01_EVG) added beside it only in the lists with DLC2 in their name that hold it (DLC2LItemEnchArmorLightCuirass, Open World Loot's OWL_Special_DLC2... lists), at the same level.")]
+        public List<string> Dlc2OnlyItems { get; set; } = new() { "ccbgssse041-netchleather.esl" };
 
         // Where the items and enchantments come from: the load order, the input files, or both (one item and enchantment
         // pair is made once either way)

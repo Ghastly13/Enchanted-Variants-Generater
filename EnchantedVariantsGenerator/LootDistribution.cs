@@ -32,6 +32,10 @@ namespace EnchantedVariantsGenerator
     //             Draugr loadout lists (LItemDraugr02BossWeapon1HMagic, ...), one per Draugr rank and weapon group, each
     //             holding every type of the group on a ladder of levels by tier. The new list holds the group's variants at
     //             the levels that ladder gives their material and tier, and goes in as often as one vanilla weapon does.
+    //   Solstheim only (setting "Only in Dragonborn (DLC2) lists", e.g. the Creation Club's Netch Leather): where the twins'
+    //             list is also used in the rest of Skyrim (SublistEnchArmorLeatherCuirass01), the variants get a list of
+    //             their own (DLC2SublistEnchArmorLeatherCuirass01_EVG), added beside it only in the lists with DLC2 in their
+    //             name that hold it (DLC2LItemEnchArmorLightCuirass, OWL_Special_DLC2...), at the same level and count.
     // The lists are read as the game holds them after SkyPatcher (RuntimeLists), and the INI is nested deeper than any
     // other mod's (SkyPatcher applies shallow folders first, see SkyPatcherOrder), so its additions land on the finished lists.
     public class LootDistribution
@@ -95,8 +99,23 @@ namespace EnchantedVariantsGenerator
             public Leaf Target = null!;
             public string? Weight;     // set for the other weight class: the class the variants are in
             public string? Material;
+            // Set for variants handed out on Solstheim only: the list goes beside Target in the DLC2 lists holding it
+            public List<(FormKey Parent, short Level, short Count)>? Dlc2Holders;
             public readonly Dictionary<FormKey, short> Items = new();
         }
+
+        // A Dragonborn list, or a mod's list for Dragonborn (Open World Loot's OWL_Special_DLC2LItemEnchArmorLightCuirassLow):
+        // DLC2 in its name
+        private bool IsDlc2List(FormKey list) =>
+            (_lists.OriginalEditorID(list) ?? "").Contains("DLC2", StringComparison.OrdinalIgnoreCase)
+            || (_lists.IsList(list) && (_lists.Record(list).EditorID ?? "").Contains("DLC2", StringComparison.OrdinalIgnoreCase));
+
+        // The DLC2 lists holding this list, with each entry's level and count
+        private List<(FormKey Parent, short Level, short Count)> Dlc2Holders(FormKey list) =>
+            _lists.Parents(list).Select(p => p.Parent).Distinct().Where(IsDlc2List)
+                .SelectMany(p => _lists.Entries[p].Where(e => e.Reference == list).Select(e => (p, e.Level, e.Count)))
+                .OrderBy(h => _lists.OriginalEditorID(h.p) ?? h.p.ToString(), StringComparer.OrdinalIgnoreCase).ThenBy(h => h.Level)
+                .ToList();
 
         // A Draugr loadout list: its weapon group, and per material and tier the entries one vanilla weapon of that material
         // has in it, as (level, how many entries at that level)
@@ -592,6 +611,10 @@ namespace EnchantedVariantsGenerator
             var draugrNew = new Dictionary<FormKey, DraugrNewList>();
             var skipped = new SortedDictionary<string, SortedDictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
             int placed = 0, alreadyListed = 0;
+            // Items handed out on Solstheim only, by plugin or EditorID
+            var dlc2Only = new HashSet<string>((config.Dlc2OnlyItems ?? new()).Select(s => s.Trim()).Where(s => s.Length > 0), StringComparer.OrdinalIgnoreCase);
+            bool OnlyDlc2(IMajorRecordGetter baseItem) =>
+                dlc2Only.Contains(baseItem.FormKey.ModKey.FileName) || (baseItem.EditorID != null && dlc2Only.Contains(baseItem.EditorID));
             // Counted by base item, or by enchantment where the enchantment is the problem
             void Skip(string reason, GeneratedVariant v, bool byEnchantment = false)
             {
@@ -615,6 +638,11 @@ namespace EnchantedVariantsGenerator
                 if (!armor && DraugrClass(itemClass) is (string draugrMaterial, string group))
                 {
                     var targets = _draugrLists.Where(d => d.Group == group && d.Ladder.ContainsKey((draugrMaterial, tier))).ToList();
+                    if (OnlyDlc2(v.BaseItem))
+                    {
+                        targets = targets.Where(d => d.EditorID.Contains("DLC2", StringComparison.OrdinalIgnoreCase)).ToList();
+                        if (targets.Count == 0) { Skip("only in DLC2 lists, and no DLC2 Draugr loadout list holds its kind", v); continue; }
+                    }
                     if (targets.Count == 0)
                     {
                         string kind = (draugrMaterial == "DraugrHoned" ? "honed " : "") + "Ancient Nord " + GroupName(group) + " weapons";
@@ -645,8 +673,25 @@ namespace EnchantedVariantsGenerator
                             : "weapon enchantment no vanilla enchanted list holds", v, true);
                         continue;
                     }
-                    string id = leaf.EditorID + ListSuffix;
-                    if (!newLists.TryGetValue(id, out target)) newLists[id] = target = new NewList { EditorID = id, Target = leaf };
+                    // Solstheim only: where the twins' list is also used outside Solstheim, a list of its own beside it in
+                    // the DLC2 lists holding it
+                    if (OnlyDlc2(v.BaseItem) && !IsDlc2List(leaf.FormKey))
+                    {
+                        var holders = leaf.PlacedIn == null ? Dlc2Holders(leaf.FormKey) : new();
+                        if (holders.Count == 0) { Skip("only in DLC2 lists, and no DLC2 list holds " + (leaf.PlacedIn != null ? "the material and type's effect lists" : leaf.EditorID), v); continue; }
+                        string dlc2ID = "DLC2" + leaf.EditorID + ListSuffix;
+                        if (!newLists.TryGetValue(dlc2ID, out target)) newLists[dlc2ID] = target = new NewList { EditorID = dlc2ID, Target = leaf, Dlc2Holders = holders };
+                    }
+                    else
+                    {
+                        string id = leaf.EditorID + ListSuffix;
+                        if (!newLists.TryGetValue(id, out target)) newLists[id] = target = new NewList { EditorID = id, Target = leaf };
+                    }
+                }
+                else if (armor && OnlyDlc2(v.BaseItem) && OtherClassFamily(itemClass) != null)
+                {
+                    Skip("only in DLC2 lists, in a weight class vanilla never enchants for its material", v);
+                    continue;
                 }
                 else if (armor && OtherClassFamily(itemClass) is { } other)
                 {
@@ -671,21 +716,44 @@ namespace EnchantedVariantsGenerator
             var report = new StringBuilder();
             var otherClassReport = new List<string>();
             var iniAdds = new HashSet<(FormKey Target, FormKey Added, short Level)>();
-            void IniAdd(FormKey target, FormKey added, short level, string comment)
+            void IniAdd(FormKey target, FormKey added, short level, string comment, short count = 1)
             {
                 if (!iniAdds.Add((target, added, level))) return;
                 ini.AppendLine("; " + comment);
-                ini.AppendLine("filterByLLs=" + target.ModKey.FileName + "|" + target.ID.ToString("X6") + ":addOnceToLLs=" + _state.PatchMod.ModKey.FileName + "|" + added.ID.ToString("X6") + "~" + level + "~1");
+                ini.AppendLine("filterByLLs=" + target.ModKey.FileName + "|" + target.ID.ToString("X6") + ":addOnceToLLs=" + _state.PatchMod.ModKey.FileName + "|" + added.ID.ToString("X6") + "~" + level + "~" + count);
             }
 
             int listCount = 0;
+            var dlc2Report = new List<string>();
             var otherClass = new Dictionary<string, Dictionary<FormKey, (FormKey New, string Material)>>();
             foreach (var list in newLists.Values.OrderBy(n => n.EditorID, StringComparer.OrdinalIgnoreCase))
             {
                 var (record, made) = WriteList(config, list.EditorID, list.Items.Select(i => (i.Key, i.Value)).ToList(), _lists.Record(list.Target.FormKey).Flags);
                 listCount += made;
                 short minLevel = list.Items.Values.Min();
-                if (list.Weight == null)
+                if (list.Dlc2Holders != null)
+                {
+                    // Beside the twins' list in each DLC2 list holding it, at the same level and count. A list holding it
+                    // more than once gets it as often (addOnceToLLs would keep only the first).
+                    foreach (var byParent in list.Dlc2Holders.GroupBy(h => h.Parent))
+                    {
+                        string parentID = _lists.OriginalEditorID(byParent.Key) ?? byParent.Key.ToString();
+                        string comment = parentID + " <- " + list.EditorID + " (" + list.Items.Count + "), beside " + list.Target.EditorID;
+                        if (byParent.Count() == 1)
+                        {
+                            IniAdd(byParent.Key, record.FormKey, byParent.First().Level, comment, byParent.First().Count);
+                        }
+                        else if (iniAdds.Add((byParent.Key, record.FormKey, byParent.First().Level)))
+                        {
+                            ini.AppendLine("; " + comment);
+                            ini.AppendLine("filterByLLs=" + byParent.Key.ModKey.FileName + "|" + byParent.Key.ID.ToString("X6") + ":addToLLs="
+                                + string.Join(",", byParent.Select(h => _state.PatchMod.ModKey.FileName + "|" + record.FormKey.ID.ToString("X6") + "~" + h.Level + "~" + h.Count)));
+                        }
+                    }
+                    dlc2Report.Add("  " + list.EditorID + " (" + list.Items.Count + ") -> " + string.Join(", ", list.Dlc2Holders.Select(h => (_lists.OriginalEditorID(h.Parent) ?? h.Parent.ToString()) + " at " + h.Level))
+                        + ", beside " + list.Target.EditorID);
+                }
+                else if (list.Weight == null)
                 {
                     // A stand-in effect list goes beside the material's other effect lists, in the list holding them
                     bool standIn = list.Target.PlacedIn != null;
@@ -817,8 +885,11 @@ namespace EnchantedVariantsGenerator
             text.AppendLine("Each list below holds enchanted variants and is added once to the vanilla list after the arrow, by");
             text.AppendLine(iniPath);
             text.AppendLine();
-            text.AppendLine("== Beside their vanilla twins (" + newLists.Values.Count(n => n.Weight == null) + " lists)");
+            text.AppendLine("== Beside their vanilla twins (" + newLists.Values.Count(n => n.Weight == null && n.Dlc2Holders == null) + " lists)");
             text.Append(report);
+            text.AppendLine();
+            text.AppendLine("== Only in DLC2 lists (" + dlc2Report.Count + " lists), beside their twins' list in the DLC2 lists holding it");
+            foreach (var line in dlc2Report) text.AppendLine(line);
             text.AppendLine();
             text.AppendLine("== Other weight class (" + newLists.Values.Count(n => n.Weight != null) + " lists)");
             foreach (var line in otherClassReport) text.AppendLine(line);

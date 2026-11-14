@@ -55,6 +55,14 @@ Distributed items
     Other weight class   armor in a weight class vanilla never enchants for its material (light Daedric, heavy Glass)
               follows that material's lists in the other class, placed in the matching lists for its own class; lists in
               between, such as the Daedric wrappers, are copied for the new class.
+    Solstheim only   items of the plugins (or EditorIDs) in setting "Only in Dragonborn (DLC2) lists", by default the
+              Creation Club's Netch Leather (ccbgssse041-netchleather.esl). Netch Leather is Leather, whose lists the rest
+              of Skyrim uses too, so its variants get lists of their own, DLC2SublistEnchArmorLeatherCuirass01_EVG and so
+              on, added beside SublistEnchArmorLeatherCuirass01 only in the lists with DLC2 in their name that hold it:
+              DLC2LItemEnchArmorLightCuirass and ...NoDragon at level 7, and Open World Loot's
+              OWL_Special_DLC2LItemEnchArmorLightCuirassLow. Each such list is one entry beside the whole Leather list
+              there, as Open World Loot's Netch Leather patch does for the unenchanted pieces. Where the twins' list is
+              itself a DLC2 one (Chitin, Stalhrim), the variants go in it as usual.
   The input files' LeveledLists entries now only give each enchantment's tier (the digits of its first non-NPC
   suffix). Each run writes "distributed items.txt" here: every list made and where it went, and every variant left
   out with the reason.
