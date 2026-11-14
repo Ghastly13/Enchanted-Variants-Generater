@@ -92,6 +92,9 @@ namespace EnchantedVariantsGenerator
             new("ArmorMaterialImperialLight", "ImperialLight", "01"),
             new("ArmorMaterialStudded", "Studded", "01"),
             new("ArmorMaterialElven", "Elven", "02"),
+            // Dragonborn's keywords for light Bonemold and Nordic, which only mods make (Paths of Empyrean's shields)
+            new("DLC2ArmorMaterialBonemoldLight", "Bonemold", "01"),
+            new("DLC2ArmorMaterialNordicLight", "Nordic", "03"),
             new("DLC2ArmorMaterialChitinLight", "Chitin", "02"),
             new("ArmorMaterialScaled", "Scaled", "02"),
             new("ArmorMaterialGlass", "Glass", "03"),
@@ -117,6 +120,8 @@ namespace EnchantedVariantsGenerator
             ("Nord Hero", new[] { "NordHero" }),
             ("Ancient Nord", new[] { "Draugr", "DraugrHoned" }),
             ("Dark Seducer", new[] { "DarkSeducer" }), ("Golden Saint", new[] { "GoldenSaint" }),
+            // Mods tag Netch Leather as Leather (the Creation Club's, Mihail's armor) or Hide (Mihail's shield)
+            ("Netch Leather", new[] { "Leather", "Hide" }),
             ("Honed", new[] { "DraugrHoned", "FalmerHoned" }),
             ("Draugr", new[] { "Draugr", "DraugrHoned" }),
             ("Skyforge", new[] { "Skyforge" }), ("Silver", new[] { "Silver" }), ("Dawnguard", new[] { "Dawnguard" }),
@@ -135,6 +140,11 @@ namespace EnchantedVariantsGenerator
             ("Leather", new[] { "Leather" }), ("Scaled", new[] { "Scaled" }),
             ("Wooden", new[] { "Wood" }), ("Hunting", new[] { "Wood" }),
         };
+
+        // Netch Leather a mod tags as Hide (Mihail's Netch Leather Shield) is Leather, as the Creation Club's Netch Leather is:
+        // it takes Leather's lists (Leather shields' included) and enchantments
+        internal static string NetchLeather(string material, string? name) =>
+            material.Equals("Hide", StringComparison.OrdinalIgnoreCase) && name != null && Regex.IsMatch(name, @"\bNetch Leather\b", RegexOptions.IgnoreCase) ? "Leather" : material;
 
         // Material by keywords: null and a reason when unknown, conflicting or missing
         internal static (Material? Material, string? Reason) MaterialOf(IEnumerable<string> keywords, Material[] table)
@@ -371,9 +381,12 @@ namespace EnchantedVariantsGenerator
                 if (reason != null) { Reject(armor, name, reason); continue; }
                 if (upgrades.Contains(armor.FormKey)) { Reject(armor, name, "crafted from another item (an upgrade)"); continue; }
 
-                bool heavy = keywords.Contains("ArmorHeavy", StringComparer.OrdinalIgnoreCase);
-                bool light = keywords.Contains("ArmorLight", StringComparer.OrdinalIgnoreCase);
-                if (heavy == light) { Reject(armor, name, heavy ? "both heavy and light" : "neither heavy nor light armor"); continue; }
+                // The weight class keyword, else the armor type: shields (vanilla's included) carry no ArmorHeavy/ArmorLight
+                bool heavyKeyword = keywords.Contains("ArmorHeavy", StringComparer.OrdinalIgnoreCase);
+                bool lightKeyword = keywords.Contains("ArmorLight", StringComparer.OrdinalIgnoreCase);
+                bool heavy = heavyKeyword || (!lightKeyword && armor.BodyTemplate?.ArmorType == ArmorType.HeavyArmor);
+                bool light = lightKeyword || (!heavyKeyword && armor.BodyTemplate?.ArmorType == ArmorType.LightArmor);
+                if (heavy == light) { Reject(armor, name, heavy ? "both heavy and light" : "neither heavy nor light armor (clothing)"); continue; }
                 var slots = new[] { "ArmorBoots", "ArmorGauntlets", "ArmorHelmet", "ArmorCuirass", "ArmorShield" }
                     .Where(s => keywords.Contains(s, StringComparer.OrdinalIgnoreCase)).ToList();
                 if (slots.Count != 1) { Reject(armor, name, slots.Count == 0 ? "no armor slot keyword" : "several armor slot keywords"); continue; }
@@ -391,6 +404,8 @@ namespace EnchantedVariantsGenerator
                 if (excludedMaterials.Contains(material.Name)) { Reject(armor, name, "excluded material " + material.Name); continue; }
                 reason = NameDisagrees(name!, material.Name);
                 if (reason != null) { Reject(armor, name, reason); continue; }
+                string byName = NetchLeather(material.Name, name);
+                if (byName != material.Name) material = LightArmorMaterials.Concat(HeavyArmorMaterials).First(m => m.Name == byName);
 
                 string weight = heavy ? "Heavy" : "Light";
                 string folderName = slots[0] switch
@@ -585,11 +600,13 @@ namespace EnchantedVariantsGenerator
                 }
             }
 
-            // SkyPatcher: keys that add items, lists or outfits anywhere under SKSE\Plugins\SkyPatcher, with its plugin gates
-            string skyPatcher = Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher");
+            // SkyPatcher: keys that add items, lists or outfits anywhere under SKSE\Plugins\SkyPatcher, with its plugin gates;
+            // likewise Paths of Empyrean's own readers of the same syntax under SKSE\Plugins\POE (its LeveledList folder adds
+            // its missing shields and their enchanted lists)
             var active = new HashSet<string>(state.LoadOrder.Where(l => l.Value.Enabled).Select(l => l.Key.FileName.String), StringComparer.OrdinalIgnoreCase);
-            if (Directory.Exists(skyPatcher))
+            foreach (var skyPatcher in new[] { Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher"), Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "POE") })
             {
+                if (!Directory.Exists(skyPatcher)) continue;
                 foreach (var file in Directory.EnumerateFiles(skyPatcher, "*.ini", SearchOption.AllDirectories))
                 {
                     var relative = Path.GetRelativePath(skyPatcher, file).Split(Path.DirectorySeparatorChar);

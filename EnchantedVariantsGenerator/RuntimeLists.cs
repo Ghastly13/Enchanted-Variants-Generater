@@ -11,8 +11,10 @@ using Mutagen.Bethesda.Synthesis;
 namespace EnchantedVariantsGenerator
 {
     // Every leveled item list as the game holds it once SkyPatcher has run: the winning record's entries, then each active
-    // SkyPatcher leveledList INI line (clear, removeFromLLs, addToLLs, addOnceToLLs) in the order SkyPatcher applies the
-    // files (SkyPatcherOrder: shallowest folders first).
+    // leveled-list INI line (clear, removeFromLLs, addToLLs, addOnceToLLs): Paths of Empyrean's (SKSE\Plugins\POE\LeveledList,
+    // read by its own SKSE plugin in SkyPatcher's syntax, by path; it applies before SkyPatcher, as its weapon renames do),
+    // then SkyPatcher's in the order SkyPatcher applies the files (SkyPatcherOrder: shallowest folders first). Paths of
+    // Empyrean places its missing shields' enchanted lists (PoE_SublistEnchArmorLeatherShield01, ...) this way.
     // Open World Loot, for one, clears and rebuilds vanilla lists this way, so where a list really sits is only known after
     // the replay. The patcher's own INIs are left out: this run rewrites them.
     public class RuntimeLists
@@ -39,6 +41,17 @@ namespace EnchantedVariantsGenerator
         public FormKey? ListByEditorID(string editorID) => _byEditorID.TryGetValue(editorID, out var fk) ? fk : null;
 
         public bool IsList(FormKey fk) => _records.ContainsKey(fk);
+
+        // Every entry of child in list moved to this level, as the patcher's own INI then does in game
+        public void Move(FormKey list, FormKey child, short level)
+        {
+            var entries = _entries[list];
+            for (int i = 0; i < entries.Count; i++)
+            {
+                if (entries[i].Reference == child) entries[i] = entries[i] with { Level = level };
+            }
+            _parents = null;
+        }
 
         // The lists holding this form, with each entry's level
         public IReadOnlyList<(FormKey Parent, short Level)> Parents(FormKey child)
@@ -89,12 +102,18 @@ namespace EnchantedVariantsGenerator
         private void ReplaySkyPatcher(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache)
         {
             string root = Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher", "leveledList");
-            if (!Directory.Exists(root)) return;
+            string poeRoot = Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "POE", "LeveledList");
             var active = new HashSet<string>(state.LoadOrder.Where(l => l.Value.Enabled).Select(l => l.Key.FileName.String), StringComparer.OrdinalIgnoreCase);
-            // SkyPatcher's order: shallowest folders first, then by path (WACCF's INI runs before OWL\Main\...)
-            var files = SkyPatcherOrder.InApplyOrder(root)
-                .Where(f => !f.Relative.Split(Path.DirectorySeparatorChar).Any(part => OwnFolders.Contains(part, StringComparer.OrdinalIgnoreCase)))
+            // Paths of Empyrean's first, by path; then SkyPatcher's in its order: shallowest folders first, then by path
+            // (WACCF's INI runs before OWL\Main\...)
+            var poeFiles = Directory.Exists(poeRoot)
+                ? Directory.EnumerateFiles(poeRoot, "*.ini", SearchOption.AllDirectories).OrderBy(f => Path.GetRelativePath(poeRoot, f), StringComparer.OrdinalIgnoreCase)
+                    .Select(f => (Full: f, Relative: Path.GetRelativePath(poeRoot, f))).ToList()
+                : new List<(string Full, string Relative)>();
+            var files = poeFiles.Concat(SkyPatcherOrder.InApplyOrder(root)
+                .Where(f => !f.Relative.Split(Path.DirectorySeparatorChar).Any(part => OwnFolders.Contains(part, StringComparer.OrdinalIgnoreCase))))
                 .ToList();
+            if (files.Count == 0) return;
 
             bool Exists(FormKey fk) => _records.ContainsKey(fk) || linkCache.TryResolve<ISkyrimMajorRecordGetter>(fk, out _);
             FormKey? ByEditorID(string id)

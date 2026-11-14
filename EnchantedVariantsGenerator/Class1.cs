@@ -36,8 +36,8 @@ namespace EnchantedVariantsGenerator
 
         [SynthesisOrder]
         [SynthesisSettingName("Only in Dragonborn (DLC2) lists")]
-        [SynthesisTooltip("Plugins (or base item EditorIDs) whose variants are handed out on Solstheim only, such as the Creation Club's Netch Leather. Where their vanilla twins' list is one the rest of Skyrim uses too (SublistEnchArmorLeatherCuirass01), they go in a list of their own (DLC2SublistEnchArmorLeatherCuirass01_EVG) added beside it only in the lists with DLC2 in their name that hold it (DLC2LItemEnchArmorLightCuirass, Open World Loot's OWL_Special_DLC2... lists), at the same level.")]
-        public List<string> Dlc2OnlyItems { get; set; } = new() { "ccbgssse041-netchleather.esl" };
+        [SynthesisTooltip("Plugins (or base item EditorIDs) whose variants are handed out on Solstheim only, such as Netch Leather (the Creation Club's, and Mihail's Netch Leather Armor). Where their vanilla twins' list is one the rest of Skyrim uses too (SublistEnchArmorLeatherCuirass01), they go in a list of their own (DLC2SublistEnchArmorLeatherCuirass01_EVG) added beside it only in the lists with DLC2 in their name that hold it (DLC2LItemEnchArmorLightCuirass, Open World Loot's OWL_Special_DLC2... lists), at the same level; where none holds it (Leather shields), in the Dragonborn counterparts of the lists that do (LItemEnchArmorLightShield -> DLC2LItemEnchArmorLightShield).")]
+        public List<string> Dlc2OnlyItems { get; set; } = new() { "ccbgssse041-netchleather.esl", "mihailnetcharmor.esp" };
 
         // Where the items and enchantments come from: the load order, the input files, or both (one item and enchantment
         // pair is made once either way)

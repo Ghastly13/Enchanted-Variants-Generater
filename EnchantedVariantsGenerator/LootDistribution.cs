@@ -84,9 +84,16 @@ namespace EnchantedVariantsGenerator
             public readonly SortedDictionary<int, short> TierLevels = new();
             public readonly HashSet<FormKey> Enchantments = new();
             public readonly List<SourceItem> Items = new();
+            // Items of other lists whose enchantments this list's kind also gets (a stand-in's, or a mod's shield list
+            // filled up from the game's shield lists, see PrepareShieldLists); not in the list itself
+            public readonly List<SourceItem> Borrowed = new();
             // Set for a stand-in effect list (EffectList): FormKey is then the list holding it, entered at this level
             public string? PlacedIn;
             public short PlaceLevel;
+            // Set for a stand-in shield list (AddStandInShieldLists): FormKey is then the material's cuirass list of the
+            // same tier (ModelEditorID), and these are the shield lists it goes in
+            public List<(FormKey Parent, short Level, short Count)>? Holders;
+            public string? ModelEditorID;
 
             // The level the list gives this tier, or the nearest tier it has
             public short LevelFor(int tier) => TierLevels.Count == 0 ? (short)1 : TierLevels.MinBy(t => (Math.Abs(t.Key - tier), t.Key)).Value;
@@ -99,8 +106,10 @@ namespace EnchantedVariantsGenerator
             public Leaf Target = null!;
             public string? Weight;     // set for the other weight class: the class the variants are in
             public string? Material;
-            // Set for variants handed out on Solstheim only: the list goes beside Target in the DLC2 lists holding it
-            public List<(FormKey Parent, short Level, short Count)>? Dlc2Holders;
+            // Set when the list goes beside Target in other lists rather than in it: a stand-in's shield lists, or for
+            // variants handed out on Solstheim only (Dlc2), the DLC2 lists holding Target
+            public List<(FormKey Parent, short Level, short Count)>? Holders;
+            public bool Dlc2;
             public readonly Dictionary<FormKey, short> Items = new();
         }
 
@@ -110,12 +119,32 @@ namespace EnchantedVariantsGenerator
             (_lists.OriginalEditorID(list) ?? "").Contains("DLC2", StringComparison.OrdinalIgnoreCase)
             || (_lists.IsList(list) && (_lists.Record(list).EditorID ?? "").Contains("DLC2", StringComparison.OrdinalIgnoreCase));
 
-        // The DLC2 lists holding this list, with each entry's level and count
-        private List<(FormKey Parent, short Level, short Count)> Dlc2Holders(FormKey list) =>
-            _lists.Parents(list).Select(p => p.Parent).Distinct().Where(IsDlc2List)
+        private string ListName(FormKey list) => _lists.OriginalEditorID(list) ?? list.ToString();
+
+        // The lists holding this list, with each entry's level and count
+        private List<(FormKey Parent, short Level, short Count)> Holders(FormKey list) =>
+            _lists.Parents(list).Select(p => p.Parent).Distinct()
                 .SelectMany(p => _lists.Entries[p].Where(e => e.Reference == list).Select(e => (p, e.Level, e.Count)))
-                .OrderBy(h => _lists.OriginalEditorID(h.p) ?? h.p.ToString(), StringComparer.OrdinalIgnoreCase).ThenBy(h => h.Level)
+                .OrderBy(h => ListName(h.p), StringComparer.OrdinalIgnoreCase).ThenBy(h => h.Level)
                 .ToList();
+
+        // Where variants handed out on Solstheim only go, of the lists their twins' list is in: the DLC2 ones. When none is,
+        // each list's Dragonborn counterpart at the same level, named as Dragonborn names its lists (LItemEnchArmorLightShield
+        // -> DLC2LItemEnchArmorLightShield, OWL_Special_LItemEnch... -> OWL_Special_DLC2LItemEnch...): Paths of Empyrean puts
+        // its Leather shield lists only in the rest of Skyrim's.
+        private List<(FormKey Parent, short Level, short Count)> Dlc2Placement(List<(FormKey Parent, short Level, short Count)> holders)
+        {
+            var dlc2 = holders.Where(h => IsDlc2List(h.Parent)).ToList();
+            if (dlc2.Count > 0) return dlc2;
+            foreach (var (parent, level, count) in holders)
+            {
+                string name = ListName(parent);
+                var counterpart = _lists.ListByEditorID("DLC2" + name)
+                    ?? (name.StartsWith("OWL_Special_", StringComparison.OrdinalIgnoreCase) ? _lists.ListByEditorID("OWL_Special_DLC2" + name.Substring("OWL_Special_".Length)) : null);
+                if (counterpart is FormKey c && !dlc2.Any(h => h.Parent == c && h.Level == level)) dlc2.Add((c, level, count));
+            }
+            return dlc2;
+        }
 
         // A Draugr loadout list: its weapon group, and per material and tier the entries one vanilla weapon of that material
         // has in it, as (level, how many entries at that level)
@@ -191,6 +220,7 @@ namespace EnchantedVariantsGenerator
         {
             var result = new LootDistribution(state, linkCache, lists);
             result.FindLeaves();
+            result.PrepareShieldLists();
             result.FindDraugrLists();
             result.AddWaccfBowListCopy();
             Console.WriteLine("Distribution: " + result._leaves.Count(l => l.Armor) + " vanilla enchanted armor lists, " + result._leaves.Count(l => !l.Armor)
@@ -351,6 +381,117 @@ namespace EnchantedVariantsGenerator
             }
         }
 
+        // A mod's shield list moved to its material's level in a list holding it (see PrepareShieldLists): the entries it had
+        // there, and the cuirass list whose level it takes
+        private record ShieldMove(FormKey List, FormKey Moved, string MovedID, List<RuntimeLists.Entry> Entries, short To, string Model, string ModelList);
+        private readonly List<ShieldMove> _moves = new();
+
+        // The game's shield lists (its own and Creation Club's, as the load order holds them) of a weight class at the tier
+        // nearest this one: where shield enchantments are taken from for shields the game has no lists for
+        private static List<Leaf> GameShieldLists(List<Leaf> shields, string weight, int tier)
+        {
+            var pool = shields.Where(l => IsBaseGame(l.FormKey.ModKey)).ToList();
+            var sameWeight = pool.Where(l => l.Class!.Split(' ')[1] == weight).ToList();
+            if (sameWeight.Count > 0) pool = sameWeight;
+            if (pool.Count == 0) return new();
+            int nearest = pool.Select(l => l.Tier).MinBy(t => (Math.Abs(t - tier), t));
+            return pool.Where(l => l.Tier == nearest).ToList();
+        }
+
+        // Shields the game makes no enchanted lists for get the enchantments its shield lists of the same weight class have
+        // at the same tier, so they match the other shields:
+        //   Lists a mod adds for them (Paths of Empyrean's PoE_SublistEnchArmorLeatherShield01-03 and its other missing
+        //   shields' lists, holding only the five vanilla shield enchantments per tier) are filled up with those
+        //   enchantments, and go where the game puts the material's other armor: in each list holding one, at the level
+        //   the material's cuirass list of the same tier has in the matching cuirass list (Paths of Empyrean puts its
+        //   Leather shield lists in LItemEnchArmorLightShield at 1, 4 and 6, Hide's levels; Leather's cuirass lists are in
+        //   LItemEnchArmorLightCuirass at 7, 9 and 11). A material with no cuirass lists in that weight class (light
+        //   Dwarven) keeps the mod's levels. The patcher's INI makes the moves in game.
+        //   Where no list exists, stand-ins: vanilla has enchanted Leather armor but no Leather shields. One per tier of the
+        //   material's cuirass lists, named as vanilla would name it (SublistEnchArmorLeatherCuirass01 ->
+        //   SublistEnchArmorLeatherShield01), and placed in the shield counterpart of each list holding the cuirass list, at
+        //   the same level (LItemEnchArmorLightCuirass holds SublistEnchArmorLeatherCuirass01 at 7: LItemEnchArmorLightShield
+        //   gets the stand-in at 7).
+        private void PrepareShieldLists()
+        {
+            var shields = _leaves.Where(l => l.Armor && l.Class != null && l.Class.EndsWith(" Shield") && l.Class.Split(' ').Length == 3).ToList();
+            if (shields.Count == 0) return;
+
+            foreach (var modList in shields.Where(l => !IsBaseGame(l.FormKey.ModKey)).OrderBy(l => l.EditorID, StringComparer.OrdinalIgnoreCase))
+            {
+                string weight = modList.Class!.Split(' ')[1];
+                var sources = GameShieldLists(shields, weight, modList.Tier);
+                foreach (var source in sources) modList.Borrowed.AddRange(source.Items);
+                int own = modList.Items.Select(i => i.Enchantment).Distinct().Count();
+                int all = modList.Items.Concat(modList.Borrowed).Select(i => i.Enchantment).Distinct().Count();
+                if (all > own)
+                {
+                    Console.WriteLine("Distribution: " + modList.EditorID + " (" + modList.FormKey.ModKey.FileName + "): its " + own + " enchantments and those of the game's tier "
+                        + sources[0].Tier + " " + weight.ToLowerInvariant() + " shields, " + all + " in all");
+                }
+
+                // Its levels: those of the material's cuirass list of the same tier
+                var parts = modList.Class.Split(' ');
+                if (!_byClass.TryGetValue(parts[0] + " " + parts[1] + " Cuirass", out var cuirassLists)) continue;
+                var model = cuirassLists.Where(l => l.Tier == modList.Tier && l.EditorID.Contains("Cuirass"))
+                    .OrderByDescending(l => IsBaseGame(l.FormKey.ModKey)).ThenBy(l => l.EditorID, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+                if (model == null) continue;
+                foreach (var holder in Holders(modList.FormKey).Select(h => h.Parent).Distinct().ToList())
+                {
+                    if (Counterpart(holder, "Shield", "Cuirass") is not FormKey cuirassList) continue;
+                    var levels = _lists.Entries[cuirassList].Where(e => e.Reference == model.FormKey).Select(e => e.Level).ToList();
+                    if (levels.Count == 0) continue;
+                    short to = levels.Min();
+                    var entries = _lists.Entries[holder].Where(e => e.Reference == modList.FormKey).ToList();
+                    if (entries.All(e => e.Level == to)) continue;
+                    _moves.Add(new ShieldMove(holder, modList.FormKey, modList.EditorID, entries, to, model.EditorID, ListName(cuirassList)));
+                    _lists.Move(holder, modList.FormKey, to);
+                    Console.WriteLine("Distribution: " + modList.EditorID + " moved in " + ListName(holder) + " from level " + string.Join("/", entries.Select(e => e.Level).Distinct())
+                        + " to " + to + ", where " + model.EditorID + " is in " + ListName(cuirassList));
+                }
+            }
+
+            foreach (var cuirasses in _leaves.Where(l => l.Armor && l.Class != null && l.Class.EndsWith(" Cuirass") && l.EditorID.Contains("Cuirass")).GroupBy(l => l.Class!))
+            {
+                var parts = cuirasses.Key.Split(' ');
+                if (parts.Length != 3) continue;
+                string shieldClass = parts[0] + " " + parts[1] + " Shield";
+                if (_byClass.ContainsKey(shieldClass)) continue;
+
+                // One cuirass list per tier, the game's own first
+                foreach (var model in cuirasses.GroupBy(l => l.Tier)
+                    .Select(g => g.OrderByDescending(l => IsBaseGame(l.FormKey.ModKey)).ThenBy(l => l.EditorID, StringComparer.OrdinalIgnoreCase).First())
+                    .OrderBy(l => l.Tier))
+                {
+                    var holders = new List<(FormKey Parent, short Level, short Count)>();
+                    foreach (var (parent, level, count) in Holders(model.FormKey))
+                    {
+                        if (Counterpart(parent, "Cuirass", "Shield") is FormKey shieldList && !holders.Any(h => h.Parent == shieldList && h.Level == level)) holders.Add((shieldList, level, count));
+                    }
+                    if (holders.Count == 0) continue;
+                    var sources = GameShieldLists(shields, parts[1], model.Tier);
+                    if (sources.Count == 0) continue;
+                    int tier = sources[0].Tier;
+                    var leaf = new Leaf
+                    {
+                        FormKey = model.FormKey,
+                        EditorID = model.EditorID.Replace("Cuirass", "Shield"),
+                        Armor = true,
+                        Class = shieldClass,
+                        Tier = model.Tier,
+                        Holders = holders,
+                        ModelEditorID = model.EditorID,
+                    };
+                    foreach (var (t, level) in model.TierLevels) leaf.TierLevels[t] = level;
+                    foreach (var source in sources) leaf.Borrowed.AddRange(source.Items);
+                    Add(_byClass, shieldClass, leaf);
+                    Console.WriteLine("Distribution: no " + shieldClass.ToLowerInvariant() + " lists in the load order: stand-in " + leaf.EditorID + " with the "
+                        + leaf.Borrowed.Select(i => i.Enchantment).Distinct().Count() + " enchantments of the game's tier " + tier + " " + parts[1].ToLowerInvariant() + " shields, in "
+                        + string.Join(", ", holders.Select(h => ListName(h.Parent) + " at " + h.Level)));
+                }
+            }
+        }
+
         // The item's EditorID in the plugin that defines it
         private string? OriginalItemEditorID(FormKey item, bool weapon)
         {
@@ -408,6 +549,7 @@ namespace EnchantedVariantsGenerator
                 bool light = keywords.Contains("ArmorLight") || (!keywords.Contains("ArmorHeavy") && armor.BodyTemplate?.ArmorType == ArmorType.LightArmor);
                 string? slot = ArmorSlots.FirstOrDefault(s => keywords.Contains("Armor" + s));
                 string? material = ItemDiscovery.MaterialNameOf(keywords, armor.Name?.String, ArmorMaterials);
+                if (material != null) material = ItemDiscovery.NetchLeather(material, armor.Name?.String);
                 if (heavy != light && slot != null && material != null) result = material + (heavy ? " Heavy " : " Light ") + slot;
             }
             return _classes[item.FormKey] = result;
@@ -494,19 +636,21 @@ namespace EnchantedVariantsGenerator
             }
             else if (Family(baseItem, itemClass) is { Count: > 0 } family)
             {
-                key = (armor ? "Armor|" : "Weapon|") + string.Join(",", family.Select(l => l.FormKey.ToString()).OrderBy(s => s, StringComparer.Ordinal));
+                // By list and name: a stand-in shield list shares its FormKey with the cuirass list it is modelled on
+                key = (armor ? "Armor|" : "Weapon|") + string.Join(",", family.Select(l => l.FormKey + "/" + l.EditorID).OrderBy(s => s, StringComparer.Ordinal));
                 bool own = _byBase.ContainsKey(baseItem.FormKey) && (itemClass == null || !_byClass.TryGetValue(itemClass, out var byClass) || byClass.Count != family.Count);
-                label = (itemClass ?? "unclassed") + (own ? " (" + baseItem.EditorID + "'s own lists)" : "");
+                label = (itemClass ?? "unclassed") + (own ? " (" + baseItem.EditorID + "'s own lists)" : "")
+                    + (family.Any(l => l.Holders != null) ? " (no lists in the load order: stand-ins " + string.Join(", ", family.Select(l => l.EditorID)) + ")" : "");
                 if (_detected.TryGetValue(key, out var cached)) return cached;
                 // An armor list's own name gives the tier; a weapon item's EditorID does (its list holds every tier)
-                sources = family.SelectMany(l => l.Items.Select(i => (i, armor ? l.Tier : i.Tier ?? l.Tier))).ToList();
+                sources = family.SelectMany(l => l.Items.Concat(l.Borrowed).Select(i => (i, armor ? l.Tier : i.Tier ?? l.Tier))).ToList();
             }
             else if (armor && OtherClassFamily(itemClass) is { } other)
             {
                 key = "Armor|" + itemClass;
                 label = itemClass + " (from " + other.Material + " " + other.OtherWeight + ")";
                 if (_detected.TryGetValue(key, out var cached)) return cached;
-                sources = other.Family.SelectMany(l => l.Items.Select(i => (i, l.Tier))).ToList();
+                sources = other.Family.SelectMany(l => l.Items.Concat(l.Borrowed).Select(i => (i, l.Tier))).ToList();
             }
             else return null;
 
@@ -673,14 +817,21 @@ namespace EnchantedVariantsGenerator
                             : "weapon enchantment no vanilla enchanted list holds", v, true);
                         continue;
                     }
-                    // Solstheim only: where the twins' list is also used outside Solstheim, a list of its own beside it in
-                    // the DLC2 lists holding it
-                    if (OnlyDlc2(v.BaseItem) && !IsDlc2List(leaf.FormKey))
+                    // A stand-in shield list goes in the shield lists, beside the other materials' shields. Solstheim only:
+                    // where the twins' list (or the stand-in's lists) is also used outside Solstheim, a list of its own
+                    // beside it in the DLC2 lists (Dlc2Placement)
+                    bool dlc2 = OnlyDlc2(v.BaseItem) && (leaf.Holders != null || !IsDlc2List(leaf.FormKey));
+                    if (leaf.Holders != null || dlc2)
                     {
-                        var holders = leaf.PlacedIn == null ? Dlc2Holders(leaf.FormKey) : new();
-                        if (holders.Count == 0) { Skip("only in DLC2 lists, and no DLC2 list holds " + (leaf.PlacedIn != null ? "the material and type's effect lists" : leaf.EditorID), v); continue; }
-                        string dlc2ID = "DLC2" + leaf.EditorID + ListSuffix;
-                        if (!newLists.TryGetValue(dlc2ID, out target)) newLists[dlc2ID] = target = new NewList { EditorID = dlc2ID, Target = leaf, Dlc2Holders = holders };
+                        var holders = leaf.Holders ?? (leaf.PlacedIn == null ? Holders(leaf.FormKey) : new());
+                        if (dlc2) holders = Dlc2Placement(holders);
+                        if (holders.Count == 0)
+                        {
+                            Skip("only in DLC2 lists, and no DLC2 list holds " + (leaf.PlacedIn != null ? "the material and type's effect lists" : leaf.EditorID) + " or a Dragonborn counterpart of a list holding it", v);
+                            continue;
+                        }
+                        string holderID = (dlc2 ? "DLC2" : "") + leaf.EditorID + ListSuffix;
+                        if (!newLists.TryGetValue(holderID, out target)) newLists[holderID] = target = new NewList { EditorID = holderID, Target = leaf, Holders = holders, Dlc2 = dlc2 };
                     }
                     else
                     {
@@ -723,22 +874,38 @@ namespace EnchantedVariantsGenerator
                 ini.AppendLine("filterByLLs=" + target.ModKey.FileName + "|" + target.ID.ToString("X6") + ":addOnceToLLs=" + _state.PatchMod.ModKey.FileName + "|" + added.ID.ToString("X6") + "~" + level + "~" + count);
             }
 
+            // Mod shield lists moved to their material's levels (PrepareShieldLists): removed from the list, then added back
+            // at the new level, once per entry they had (two lines, applied in order)
+            static string FormString(FormKey fk) => fk.ModKey.FileName + "|" + fk.ID.ToString("X6");
+            var movesReport = new List<string>();
+            foreach (var move in _moves)
+            {
+                string from = string.Join("/", move.Entries.Select(e => e.Level).Distinct());
+                ini.AppendLine("; " + ListName(move.List) + ": " + move.MovedID + " moved from level " + from + " to " + move.To + ", where " + move.Model + " is in " + move.ModelList);
+                ini.AppendLine("filterByLLs=" + FormString(move.List) + ":removeFromLLs=" + FormString(move.Moved));
+                ini.AppendLine("filterByLLs=" + FormString(move.List) + ":addToLLs=" + string.Join(",", move.Entries.Select(e => FormString(move.Moved) + "~" + move.To + "~" + e.Count)));
+                movesReport.Add("  " + move.MovedID + " in " + ListName(move.List) + ": level " + from + " -> " + move.To + ", as " + move.Model + " in " + move.ModelList);
+            }
+
             int listCount = 0;
             var dlc2Report = new List<string>();
+            var standInReport = new List<string>();
             var otherClass = new Dictionary<string, Dictionary<FormKey, (FormKey New, string Material)>>();
             foreach (var list in newLists.Values.OrderBy(n => n.EditorID, StringComparer.OrdinalIgnoreCase))
             {
                 var (record, made) = WriteList(config, list.EditorID, list.Items.Select(i => (i.Key, i.Value)).ToList(), _lists.Record(list.Target.FormKey).Flags);
                 listCount += made;
                 short minLevel = list.Items.Values.Min();
-                if (list.Dlc2Holders != null)
+                if (list.Holders != null)
                 {
-                    // Beside the twins' list in each DLC2 list holding it, at the same level and count. A list holding it
-                    // more than once gets it as often (addOnceToLLs would keep only the first).
-                    foreach (var byParent in list.Dlc2Holders.GroupBy(h => h.Parent))
+                    // Beside the twins' list (or for a stand-in, the other materials' shield lists) in each list, at the
+                    // level and count it has there. A list holding it more than once gets it as often (addOnceToLLs would
+                    // keep only the first).
+                    string beside = list.Target.Holders != null ? "stand-in for " + list.Target.EditorID + ", placed as " + list.Target.ModelEditorID + " is" : "beside " + list.Target.EditorID;
+                    foreach (var byParent in list.Holders.GroupBy(h => h.Parent))
                     {
-                        string parentID = _lists.OriginalEditorID(byParent.Key) ?? byParent.Key.ToString();
-                        string comment = parentID + " <- " + list.EditorID + " (" + list.Items.Count + "), beside " + list.Target.EditorID;
+                        string parentID = ListName(byParent.Key);
+                        string comment = parentID + " <- " + list.EditorID + " (" + list.Items.Count + "), " + beside;
                         if (byParent.Count() == 1)
                         {
                             IniAdd(byParent.Key, record.FormKey, byParent.First().Level, comment, byParent.First().Count);
@@ -750,8 +917,8 @@ namespace EnchantedVariantsGenerator
                                 + string.Join(",", byParent.Select(h => _state.PatchMod.ModKey.FileName + "|" + record.FormKey.ID.ToString("X6") + "~" + h.Level + "~" + h.Count)));
                         }
                     }
-                    dlc2Report.Add("  " + list.EditorID + " (" + list.Items.Count + ") -> " + string.Join(", ", list.Dlc2Holders.Select(h => (_lists.OriginalEditorID(h.Parent) ?? h.Parent.ToString()) + " at " + h.Level))
-                        + ", beside " + list.Target.EditorID);
+                    (list.Dlc2 ? dlc2Report : standInReport).Add("  " + list.EditorID + " (" + list.Items.Count + ") -> "
+                        + string.Join(", ", list.Holders.Select(h => ListName(h.Parent) + " at " + h.Level)) + ", " + beside);
                 }
                 else if (list.Weight == null)
                 {
@@ -885,10 +1052,16 @@ namespace EnchantedVariantsGenerator
             text.AppendLine("Each list below holds enchanted variants and is added once to the vanilla list after the arrow, by");
             text.AppendLine(iniPath);
             text.AppendLine();
-            text.AppendLine("== Beside their vanilla twins (" + newLists.Values.Count(n => n.Weight == null && n.Dlc2Holders == null) + " lists)");
+            text.AppendLine("== Beside their vanilla twins (" + newLists.Values.Count(n => n.Weight == null && n.Holders == null) + " lists)");
             text.Append(report);
             text.AppendLine();
-            text.AppendLine("== Only in DLC2 lists (" + dlc2Report.Count + " lists), beside their twins' list in the DLC2 lists holding it");
+            text.AppendLine("== Mods' shield lists moved to their material's levels (" + movesReport.Count + ")");
+            foreach (var line in movesReport) text.AppendLine(line);
+            text.AppendLine();
+            text.AppendLine("== Stand-ins for shield lists a material has none of (" + standInReport.Count + " lists), in the shield lists where its cuirass lists are");
+            foreach (var line in standInReport) text.AppendLine(line);
+            text.AppendLine();
+            text.AppendLine("== Only in DLC2 lists (" + dlc2Report.Count + " lists), beside their twins' list in the DLC2 lists holding it (else in the Dragonborn counterparts of the lists holding it)");
             foreach (var line in dlc2Report) text.AppendLine(line);
             text.AppendLine();
             text.AppendLine("== Other weight class (" + newLists.Values.Count(n => n.Weight != null) + " lists)");
