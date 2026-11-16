@@ -833,7 +833,9 @@ namespace EnchantedVariantsGenerator
             var linkcache = state.LoadOrder.ToImmutableLinkCache();
             VaerPatch.Run(state, linkcache, config);
             ItemNames.Build(state, linkcache, config);
-            ItemNames.WriteRuntimeNameOverrides(state, linkcache, config);
+            // How forms are named in the SkyPatcher INIs (EditorID where it can be)
+            var refs = new SkyPatcherRefs(state, linkcache);
+            ItemNames.WriteRuntimeNameOverrides(state, linkcache, config, refs);
 
             AssetIndex.Build(state);
             // What already reaches the world, and the vanilla enchanted lists the variants go beside (as they stand after SkyPatcher)
@@ -890,7 +892,8 @@ namespace EnchantedVariantsGenerator
             // Runs after all tasks finish, so its records are created on one thread
             var variants = new List<GeneratedVariant>();
             foreach (var task in tasks) variants.AddRange(task.Result.Variants);
-            loot.Run(config, dataPath, variants, distribution);
+            loot.Run(config, dataPath, variants, distribution, refs);
+            refs.CheckPatch();
         } // End of Patching
 
     }

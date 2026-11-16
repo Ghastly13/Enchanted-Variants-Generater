@@ -163,7 +163,7 @@ namespace EnchantedVariantsGenerator
         // renames such as WACCF's "Ancient Nord Honed Sword of Frost". Written as SkyPatcher INIs applied after other
         // mods' (SkyPatcher also applies after Paths of Empyrean's renames, so nothing goes to its folder), with a line
         // only where the shown name would change. The INIs are rewritten every run and removed when they no longer apply.
-        public static void WriteRuntimeNameOverrides(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, Config config)
+        public static void WriteRuntimeNameOverrides(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, Config config, SkyPatcherRefs refs)
         {
             string skyPatcher = Path.Combine(state.DataFolderPath.Path, "SKSE", "Plugins", "SkyPatcher");
             // Nested deeper than any other mod's INI, so SkyPatcher applies these last (see SkyPatcherOrder)
@@ -223,7 +223,7 @@ namespace EnchantedVariantsGenerator
             var weaponLines = new List<string>();
             foreach (var (item, name) in weaponNames)
             {
-                weaponLines.Add("filterByWeapons=" + FormString(item) + ":fullName=~" + name + "~");
+                weaponLines.Add("filterByWeapons=" + refs.Ref(item) + ":fullName=~" + name + "~");
             }
 
             var armorLines = new List<string>();
@@ -234,7 +234,7 @@ namespace EnchantedVariantsGenerator
                     if (armor.TemplateArmor.IsNull || armor.ObjectEffect.IsNull || armor.FormKey.ModKey == state.PatchMod.ModKey) continue;
                     if (!linkCache.TryResolve<IArmorGetter>(armor.TemplateArmor.FormKey, out var template)) continue;
                     var wanted = Restored(armor.FormKey, armor.Name?.String, armor.ObjectEffect.FormKey, template.FormKey, template.Name?.String);
-                    if (wanted != null) armorLines.Add("filterByArmors=" + FormString(armor.FormKey) + ":fullName=~" + wanted + "~");
+                    if (wanted != null) armorLines.Add("filterByArmors=" + refs.Ref(armor.FormKey) + ":fullName=~" + wanted + "~");
                 }
             }
 
@@ -244,7 +244,6 @@ namespace EnchantedVariantsGenerator
                 + armorLines.Count + " armors");
         }
 
-        private static string FormString(FormKey formKey) => formKey.ModKey.FileName + "|" + formKey.ID.ToString("X6");
 
         // One item renamed by two mods: carry Paths of Empyrean's word swaps (against the plugin name) over to the
         // SkyPatcher name. Plugin "Supple Ancient Nord Bow", PoE "Supple Ancient Nord Shortbow" (Bow -> Shortbow),

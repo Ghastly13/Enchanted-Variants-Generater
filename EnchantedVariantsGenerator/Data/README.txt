@@ -44,6 +44,10 @@ Distributed items
   leveledList\Weapons Armor Clothing and Clutter Fixes\... runs before OWL's leveledList\OWL\Main\...), then by path.
   So the patcher nests its INIs (this one, and its weapon and armor name INIs) in "zz" folders one level deeper than
   any other mod's INI in the same folder: they apply last, after every clear and removal, whatever is installed.
+  The INIs name forms by EditorID, as Open World Loot's do (SublistEnchArmorLeatherShield01_EVG), where SkyPatcher can be
+  given one: made only of letters, digits and _, and on no other leveled list, weapon or armor in any version (a record
+  Thaumaturgy names MAG_EnchHuntingBowStaminaDamage02 and its WACCF patch renames still answers to the old name). Other
+  forms are written as Plugin.esp|FormID without leading zeros (Skyrim.esm|A7356), each listed in the Synthesis log.
     Armor     the tier list for the base's material, weight class and slot (where its own vanilla variants are, if it
               has any), at the enchantment's tier or the nearest the material has.
     Weapons   the material and type's list for the enchantment's effect (Fire, Frost, ...). Where the material and type

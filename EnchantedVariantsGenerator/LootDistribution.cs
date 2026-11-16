@@ -730,7 +730,7 @@ namespace EnchantedVariantsGenerator
 
         // distribution: what already reaches the world, so an existing variant standing in for a duplicate is filed only
         // when nothing hands it out yet
-        public void Run(Config config, string dataPath, List<GeneratedVariant> variants, Distribution distribution)
+        public void Run(Config config, string dataPath, List<GeneratedVariant> variants, Distribution distribution, SkyPatcherRefs refs)
         {
             // SkyPatcher applies the INIs of a type folder shallowest folder first (OWL\Main\... runs after WACCF\...), so the
             // INI goes one folder deeper than any other mod's: its additions then land after every clear and removal
@@ -867,23 +867,24 @@ namespace EnchantedVariantsGenerator
             var report = new StringBuilder();
             var otherClassReport = new List<string>();
             var iniAdds = new HashSet<(FormKey Target, FormKey Added, short Level)>();
+            // Forms by EditorID where SkyPatcher can be given one, else Plugin.esp|FormID
+            string Form(FormKey fk) => refs.Ref(fk);
             void IniAdd(FormKey target, FormKey added, short level, string comment, short count = 1)
             {
                 if (!iniAdds.Add((target, added, level))) return;
                 ini.AppendLine("; " + comment);
-                ini.AppendLine("filterByLLs=" + target.ModKey.FileName + "|" + target.ID.ToString("X6") + ":addOnceToLLs=" + _state.PatchMod.ModKey.FileName + "|" + added.ID.ToString("X6") + "~" + level + "~" + count);
+                ini.AppendLine("filterByLLs=" + Form(target) + ":addOnceToLLs=" + Form(added) + "~" + level + "~" + count);
             }
 
             // Mod shield lists moved to their material's levels (PrepareShieldLists): removed from the list, then added back
             // at the new level, once per entry they had (two lines, applied in order)
-            static string FormString(FormKey fk) => fk.ModKey.FileName + "|" + fk.ID.ToString("X6");
             var movesReport = new List<string>();
             foreach (var move in _moves)
             {
                 string from = string.Join("/", move.Entries.Select(e => e.Level).Distinct());
                 ini.AppendLine("; " + ListName(move.List) + ": " + move.MovedID + " moved from level " + from + " to " + move.To + ", where " + move.Model + " is in " + move.ModelList);
-                ini.AppendLine("filterByLLs=" + FormString(move.List) + ":removeFromLLs=" + FormString(move.Moved));
-                ini.AppendLine("filterByLLs=" + FormString(move.List) + ":addToLLs=" + string.Join(",", move.Entries.Select(e => FormString(move.Moved) + "~" + move.To + "~" + e.Count)));
+                ini.AppendLine("filterByLLs=" + Form(move.List) + ":removeFromLLs=" + Form(move.Moved));
+                ini.AppendLine("filterByLLs=" + Form(move.List) + ":addToLLs=" + string.Join(",", move.Entries.Select(e => Form(move.Moved) + "~" + move.To + "~" + e.Count)));
                 movesReport.Add("  " + move.MovedID + " in " + ListName(move.List) + ": level " + from + " -> " + move.To + ", as " + move.Model + " in " + move.ModelList);
             }
 
@@ -913,8 +914,8 @@ namespace EnchantedVariantsGenerator
                         else if (iniAdds.Add((byParent.Key, record.FormKey, byParent.First().Level)))
                         {
                             ini.AppendLine("; " + comment);
-                            ini.AppendLine("filterByLLs=" + byParent.Key.ModKey.FileName + "|" + byParent.Key.ID.ToString("X6") + ":addToLLs="
-                                + string.Join(",", byParent.Select(h => _state.PatchMod.ModKey.FileName + "|" + record.FormKey.ID.ToString("X6") + "~" + h.Level + "~" + h.Count)));
+                            ini.AppendLine("filterByLLs=" + Form(byParent.Key) + ":addToLLs="
+                                + string.Join(",", byParent.Select(h => Form(record.FormKey) + "~" + h.Level + "~" + h.Count)));
                         }
                     }
                     (list.Dlc2 ? dlc2Report : standInReport).Add("  " + list.EditorID + " (" + list.Items.Count + ") -> "
@@ -1037,8 +1038,8 @@ namespace EnchantedVariantsGenerator
                 }
                 var adds = share.SelectMany(l => Enumerable.Repeat(l.Level, wanted <= room ? l.Count : Math.Max(1, l.Count * room / wanted))).Take(room).ToList();
                 ini.AppendLine("; " + d.EditorID + " <- " + id + " (" + n.Items.Count + "), " + adds.Count + " entries: one vanilla " + string.Join(" and one ", n.Items.Values.Select(k => k.Material).Distinct().OrderBy(m => m.Length).Select(m => m == "DraugrHoned" ? "honed" : "Ancient Nord")) + " weapon's share");
-                ini.AppendLine("filterByLLs=" + d.FormKey.ModKey.FileName + "|" + d.FormKey.ID.ToString("X6") + ":addToLLs="
-                    + string.Join(",", adds.Select(level => _state.PatchMod.ModKey.FileName + "|" + record.FormKey.ID.ToString("X6") + "~" + level + "~1")));
+                ini.AppendLine("filterByLLs=" + Form(d.FormKey) + ":addToLLs="
+                    + string.Join(",", adds.Select(level => Form(record.FormKey) + "~" + level + "~1")));
                 draugrAdds++;
                 draugrReport.Add("  " + id + " (" + n.Items.Count + ") -> " + d.EditorID + ", " + adds.Count + " entries at levels "
                     + string.Join(",", adds.Distinct()) + (adds.Count < wanted ? " (cut from " + wanted + " to stay within " + MaxEntriesPerList + ")" : ""));
