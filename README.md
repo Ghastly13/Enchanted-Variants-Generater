@@ -33,7 +33,7 @@ enchantment found, every list made and where it went, and everything left out, w
 
 ## Installing
 
-In Synthesis, add a Git Repository patcher with the URL `https://github.com/Ghastly13/Enchanted-Variants-Generater` and
+In Synthesis, add a Git Repository patcher with the URL `https://github.com/Ghastly13/Enchanted-Variants-Generator` and
 pick the `EnchantedVariantsGenerator` project.
 
 The generated items and lists go in the Synthesis patch. The SkyPatcher INIs are written to
