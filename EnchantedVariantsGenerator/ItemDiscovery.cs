@@ -234,8 +234,9 @@ namespace EnchantedVariantsGenerator
                 mod != state.PatchMod.ModKey && !excludedPlugins.Contains(mod.FileName) && (config.DiscoverCreationClub || !CreationClub.IsMatch(mod.FileName));
 
 
-            // Items crafted from another weapon or armor are upgrades of it (Masterwork, crossbow modifications), not bases
-            var upgrades = new HashSet<FormKey>();
+            // Items crafted from another weapon or armor are upgrades of it (Masterwork, crossbow modifications), not bases:
+            // each with the weapons and armor it is crafted from
+            var upgrades = new Dictionary<FormKey, List<FormKey>>();
             foreach (var recipe in state.LoadOrder.PriorityOrder.ConstructibleObject().WinningOverrides())
             {
                 if (recipe.CreatedObject.IsNull || recipe.Items == null) continue;
@@ -244,10 +245,23 @@ namespace EnchantedVariantsGenerator
                     var fk = component.Item.Item.FormKey;
                     if (linkCache.TryResolve<IWeaponGetter>(fk, out _) || linkCache.TryResolve<IArmorGetter>(fk, out _))
                     {
-                        upgrades.Add(recipe.CreatedObject.FormKey);
-                        break;
+                        if (!upgrades.TryGetValue(recipe.CreatedObject.FormKey, out var sources)) upgrades[recipe.CreatedObject.FormKey] = sources = new();
+                        sources.Add(fk);
                     }
                 }
+            }
+
+            // Honing is no upgrade: a honed weapon (Ancient Nord, Falmer) crafted only from the plain weapon of its material
+            // is loot of its own, as vanilla's honed weapons are in the Draugr and Falmer lists. Heavy Armory and the Fishing
+            // Creation Club let the player hone theirs (with WACCF, from the plain one and a Corundum Ingot). A Masterwork
+            // piece crafted from a honed weapon is still an upgrade
+            bool Honing(string materialName, List<FormKey> sources)
+            {
+                if (!materialName.EndsWith("Honed", StringComparison.OrdinalIgnoreCase)) return false;
+                string plain = materialName[..^"Honed".Length];
+                return sources.All(s => linkCache.TryResolve<IWeaponGetter>(s, out var source)
+                    && MaterialNameOf((source.Keywords ?? Array.Empty<IFormLinkGetter<IKeywordGetter>>()).Select(k => KeywordID(k.FormKey)), source.Name?.String, WeaponMaterials) is string m
+                    && m.Equals(plain, StringComparison.OrdinalIgnoreCase));
             }
 
             // Whether the item's enchanted variants would reach loot: a vanilla enchanted list for its material and type or
@@ -337,7 +351,6 @@ namespace EnchantedVariantsGenerator
                 bool playable = weapon.Data == null || !weapon.Data.Flags.HasFlag(WeaponData.Flag.NonPlayable);
                 string? reason = CommonChecks(weapon, name, keywords, playable, AssetIndex.MeshPresent(weapon.Model?.File));
                 if (reason != null) { Reject(weapon, name, reason); continue; }
-                if (upgrades.Contains(weapon.FormKey)) { Reject(weapon, name, "crafted from another item (an upgrade)"); continue; }
 
                 var anim = weapon.Data?.AnimationType;
                 bool bow = anim is WeaponAnimationType.Bow or WeaponAnimationType.Crossbow;
@@ -350,9 +363,12 @@ namespace EnchantedVariantsGenerator
                 string materialName = material.Name;
                 // Nord Hero weapons carry the honed Draugr keyword; only their name tells them apart
                 if (materialName.StartsWith("Draugr") && name!.Contains("Nord Hero", StringComparison.OrdinalIgnoreCase)) materialName = "NordHero";
+                if (upgrades.TryGetValue(weapon.FormKey, out var upgradeSources) && !Honing(materialName, upgradeSources)) { Reject(weapon, name, "crafted from another item (an upgrade)"); continue; }
                 if (excludedMaterials.Contains(materialName)) { Reject(weapon, name, "excluded material " + materialName); continue; }
                 reason = NameDisagrees(name!, materialName);
                 if (reason != null) { Reject(weapon, name, reason); continue; }
+
+                if (loot.AncientNordDagger(weapon)) { Reject(weapon, name, LootDistribution.AncientNordDaggerReason); continue; }
 
                 string folderName = material.Tier == "AncientNord"
                     ? (bow ? "" : "weaponsAncientNord")
@@ -379,7 +395,7 @@ namespace EnchantedVariantsGenerator
                 bool hasModel = AssetIndex.MeshPresent(armor.WorldModel?.Male?.Model?.File) || AssetIndex.MeshPresent(armor.WorldModel?.Female?.Model?.File);
                 string? reason = CommonChecks(armor, name, keywords, playable, hasModel);
                 if (reason != null) { Reject(armor, name, reason); continue; }
-                if (upgrades.Contains(armor.FormKey)) { Reject(armor, name, "crafted from another item (an upgrade)"); continue; }
+                if (upgrades.ContainsKey(armor.FormKey)) { Reject(armor, name, "crafted from another item (an upgrade)"); continue; }
 
                 // The weight class keyword, else the armor type: shields (vanilla's included) carry no ArmorHeavy/ArmorLight
                 bool heavyKeyword = keywords.Contains("ArmorHeavy", StringComparer.OrdinalIgnoreCase);

@@ -20,7 +20,11 @@ Where items and enchantments come from
   Its name must name its material: "Netch Leather" counts for Leather or Hide, as mods tag it either way, and Netch
   Leather tagged Hide (Mihail's shield) is taken as Leather. Ancient Nord weapons follow the Draugr loadout
   lists (frost; the honed greatsword's fire variants are in no list, only on Red Eagle and in Labyrinthian, so they
-  are not used). A kind with no enchanted items in those lists (Imperial armor) gets nothing.
+  are not used), daggers excepted: Draugr have no dagger animations, so Ancient Nord daggers get no variants. A kind
+  with no enchanted items in those lists (Imperial armor) gets nothing.
+  Items crafted from another weapon or armor (Masterwork pieces, enhanced crossbows) are upgrades, not bases, and are
+  left out, except honed weapons crafted only from the plain weapon of their material: Heavy Armory's and the Fishing
+  Creation Club's honed Ancient Nord weapons, which the player can hone, are loot of their own like vanilla's.
 
   Input files
   An "input" folder here, one subfolder per group: every enchantment file in a subfolder applies to every weapon/armor
@@ -54,7 +58,8 @@ Distributed items
               have no list for that effect, a stand-in named as vanilla would name it is added beside their other ones.
     Ancient Nord   (Draugr and honed) has no such lists: vanilla hands its frost variants out through the Draugr loadout
               lists (LItemDraugr02BossWeapon1HMagic, LItemDraugr05Weapon2HMagic, ...), one per Draugr rank and weapon group
-              (one-handed, two-handed, bow), each holding the group's types on a ladder of levels by tier. Each variant
+              (one-handed, two-handed, bow; no daggers, which Draugr cannot wield), each holding the group's types on a
+              ladder of levels by tier. Each variant
               goes in every list of its group whose ladder has its material and tier, at those levels, and the new list
               goes in as often as one vanilla weapon of each material does.
               Bows: the bow list is WACCF's (LItemDraugr02BossWeaponBowMagic). Without it, the patcher makes a copy,

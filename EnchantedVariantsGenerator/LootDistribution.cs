@@ -275,14 +275,15 @@ namespace EnchantedVariantsGenerator
             }
         }
 
-        // "Draugr Sword" -> (Draugr, 1H), "DraugrHoned Greatsword" -> (DraugrHoned, 2H); null for any other class
+        // "Draugr Sword" -> (Draugr, 1H), "DraugrHoned Greatsword" -> (DraugrHoned, 2H); null for any other class. Daggers
+        // have no group: Draugr have no dagger animations (AncientNordDagger)
         private static (string Material, string Group)? DraugrClass(string? itemClass)
         {
             var parts = itemClass?.Split(' ');
             if (parts is not { Length: 2 } || !DraugrMaterials.Contains(parts[0], StringComparer.OrdinalIgnoreCase)) return null;
             string? group = parts[1] switch
             {
-                "Sword" or "WarAxe" or "Mace" or "Dagger" => "1H",
+                "Sword" or "WarAxe" or "Mace" => "1H",
                 "Greatsword" or "Battleaxe" or "Warhammer" => "2H",
                 "Bow" or "Crossbow" => "Bow",
                 _ => null,
@@ -291,6 +292,18 @@ namespace EnchantedVariantsGenerator
         }
 
         private static string GroupName(string group) => group switch { "1H" => "one-handed", "2H" => "two-handed", _ => "bow" };
+
+        public const string AncientNordDaggerReason = "an Ancient Nord dagger: Draugr have no dagger animations, so no Draugr loadout list takes its variants";
+
+        // An Ancient Nord (Draugr or honed) dagger, by its type keyword or its animation. Ancient Nord variants go only in the
+        // Draugr loadout lists, and Draugr have no dagger animations, so daggers get no variants
+        public bool AncientNordDagger(IMajorRecordGetter item)
+        {
+            if (item is not IWeaponGetter weapon) return false;
+            var parts = ClassOf(item)?.Split(' ');
+            if (parts is not { Length: 2 } || !DraugrMaterials.Contains(parts[0], StringComparer.OrdinalIgnoreCase)) return false;
+            return parts[1] == "Dagger" || weapon.Data?.AnimationType == WeaponAnimationType.OneHandDagger;
+        }
 
         // Vanilla enchanted sublists: named SublistEnch..., holding enchanted items of one material and type or slot, and
         // the game's own or placed straight into one of the game's lists (Thaumaturgy's MAG_SublistEnchIronSwordDamageArmor
@@ -583,6 +596,7 @@ namespace EnchantedVariantsGenerator
         // For item discovery: null when the item's variants would reach loot, else why not
         public string? Problem(IMajorRecordGetter item)
         {
+            if (AncientNordDagger(item)) return AncientNordDaggerReason;
             string? itemClass = ClassOf(item);
             if (item is IWeaponGetter && DraugrClass(itemClass) is (string material, string group))
             {
@@ -778,6 +792,7 @@ namespace EnchantedVariantsGenerator
                 string? itemClass = ClassOf(v.BaseItem);
                 bool armor = v.BaseItem is IArmorGetter;
 
+                if (AncientNordDagger(v.BaseItem)) { Skip(AncientNordDaggerReason, v); continue; }
                 // Ancient Nord: every Draugr loadout list of the weapon's group whose ladder has its material and tier
                 if (!armor && DraugrClass(itemClass) is (string draugrMaterial, string group))
                 {
