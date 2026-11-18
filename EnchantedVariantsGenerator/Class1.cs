@@ -82,6 +82,21 @@ namespace EnchantedVariantsGenerator
         public List<string> DiscoverExcludedItems { get; set; } = new();
 
         [SynthesisOrder]
+        [SynthesisSettingName("Jewelry: variants of modded jewelry")]
+        [SynthesisTooltip("Give every plain ring, necklace and circlet a mod adds that is found in loot (the Creation Club's Nordic Jewelry, ...) the enchantments the game's enchanted jewelry lists carry on its slot, from the game and the plugins below (Thaumaturgy, Summermyst), named as those items are (\"Nordic Ring of Minor Destruction\"), and hand each out beside the items with its enchantment, at the level their list gives them. The game's own jewelry is left as the game made it. Creation Club pieces need \"Items: include Creation Club items\"; \"Items: excluded plugins\" and \"Items: excluded items\" apply.")]
+        public bool JewelryVariants { get; set; } = true;
+
+        [SynthesisOrder]
+        [SynthesisSettingName("Jewelry: also enchantments from")]
+        [SynthesisTooltip("Plugins whose enchantments, on enchanted jewelry in the game's enchanted jewelry lists, modded jewelry pieces also get, besides the game's own.")]
+        public List<string> JewelryEnchantmentPlugins { get; set; } = new() { "Thaumaturgy.esp", "Summermyst - Enchantments of Skyrim.esp" };
+
+        [SynthesisOrder]
+        [SynthesisSettingName("Jewelry: most pieces per plugin")]
+        [SynthesisTooltip("A plugin adding more jewelry pieces than this is left out whole: each piece gets every enchantment of its slot (some 200 for rings and necklaces), so a mod with thousands (Immersive Jewelry has some 5,000) would make a million items. Listed in \"discovered items.txt\".")]
+        public int JewelryMaxPiecesPerPlugin { get; set; } = 100;
+
+        [SynthesisOrder]
         [SynthesisSettingName("V.A.E.R.: keep its visuals against the load order")]
         [SynthesisTooltip("When V.A.E.R. - Visual Animated Enchants Reborn (VAEReborn.esp, either edition) is installed: for every magic effect, enchantment and weapon it overrides, write the winning version with V.A.E.R.'s changes on top (its enchant art and shaders, its animated effects on unique enchantments, its enchantments on unique weapons). Mods later in the load order (Thaumaturgy, Summermyst, ...) no longer erase its visuals, and its own copies no longer undo fixes from mods before it (USSEP, ...). Every patched record is listed in the log.")]
         public bool PatchVaer { get; set; } = true;

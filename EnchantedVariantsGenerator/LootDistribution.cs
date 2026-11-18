@@ -36,9 +36,10 @@ namespace EnchantedVariantsGenerator
     //             list is also used in the rest of Skyrim (SublistEnchArmorLeatherCuirass01), the variants get a list of
     //             their own (DLC2SublistEnchArmorLeatherCuirass01_EVG), added beside it only in the lists with DLC2 in their
     //             name that hold it (DLC2LItemEnchArmorLightCuirass, OWL_Special_DLC2...), at the same level and count.
+    //   Jewelry   beside the game's enchanted jewelry with the same enchantment, at the level its list gives it (Jewelry.cs).
     // The lists are read as the game holds them after SkyPatcher (RuntimeLists), and the INI is nested deeper than any
     // other mod's (SkyPatcher applies shallow folders first, see SkyPatcherOrder), so its additions land on the finished lists.
-    public class LootDistribution
+    public partial class LootDistribution
     {
         public const string ListSuffix = "_EVG";
         private const string IniFolder = "zz Enchanted Variants Generator";
@@ -216,7 +217,7 @@ namespace EnchantedVariantsGenerator
             _lists = lists;
         }
 
-        public static LootDistribution Build(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, RuntimeLists lists)
+        public static LootDistribution Build(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, ImmutableLoadOrderLinkCache<ISkyrimMod, ISkyrimModGetter> linkCache, RuntimeLists lists, Config config)
         {
             var result = new LootDistribution(state, linkCache, lists);
             result.FindLeaves();
@@ -225,6 +226,7 @@ namespace EnchantedVariantsGenerator
             result.AddWaccfBowListCopy();
             Console.WriteLine("Distribution: " + result._leaves.Count(l => l.Armor) + " vanilla enchanted armor lists, " + result._leaves.Count(l => !l.Armor)
                 + " weapon lists and " + result._draugrLists.Count + " Draugr loadout lists, read after " + lists.IniLines + " SkyPatcher leveled-list lines");
+            result.FindJewelry(config);
             return result;
         }
 
@@ -596,6 +598,10 @@ namespace EnchantedVariantsGenerator
         // For item discovery: null when the item's variants would reach loot, else why not
         public string? Problem(IMajorRecordGetter item)
         {
+            if (item is IArmorGetter jewel && JewelSlotOf(jewel) is JewelSlot slot)
+            {
+                return JewelryKind(slot) != null ? null : "no enchanted " + Plural(slot) + " in the game's enchanted jewelry lists";
+            }
             if (AncientNordDagger(item)) return AncientNordDaggerReason;
             string? itemClass = ClassOf(item);
             if (item is IWeaponGetter && DraugrClass(itemClass) is (string material, string group))
@@ -633,6 +639,7 @@ namespace EnchantedVariantsGenerator
         // Ancient Nord gets frost only.
         public DetectedKind? EnchantmentsFor(IMajorRecordGetter baseItem)
         {
+            if (baseItem is IArmorGetter jewel && JewelSlotOf(jewel) is JewelSlot slot) return JewelryKind(slot);
             string? itemClass = ClassOf(baseItem);
             bool armor = baseItem is IArmorGetter;
             string key, label;
@@ -787,6 +794,21 @@ namespace EnchantedVariantsGenerator
             {
                 // An existing variant that already reaches the world needs no second place
                 if (v.Existing && distribution.IsDistributed(v.FormKey)) { alreadyListed++; continue; }
+
+                // Jewelry: beside the game's items with the same enchantment, at the level their list gives them
+                if (v.BaseItem is IArmorGetter jewel && JewelSlotOf(jewel) is JewelSlot jewelSlot)
+                {
+                    if (JewelryTarget(jewelSlot, v.Enchantment.Enchantment.FormKey) is not var (jewelLeaf, jewelLevel))
+                    {
+                        Skip("jewelry enchantment no enchanted " + Plural(jewelSlot).TrimEnd('s') + " of the game's lists has", v, true);
+                        continue;
+                    }
+                    string jewelID = jewelLeaf.EditorID + ListSuffix;
+                    if (!newLists.TryGetValue(jewelID, out var jewelList)) newLists[jewelID] = jewelList = new NewList { EditorID = jewelID, Target = jewelLeaf };
+                    jewelList.Items[v.FormKey] = jewelList.Items.TryGetValue(v.FormKey, out var had) ? Math.Min(had, jewelLevel) : jewelLevel;
+                    placed++;
+                    continue;
+                }
 
                 if (EnchantmentTier(v.Enchantment) is not int tier) { Skip("enchantment tier unknown", v); continue; }
                 string? itemClass = ClassOf(v.BaseItem);

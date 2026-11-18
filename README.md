@@ -12,6 +12,10 @@ variants of weapons and armor and hands them out as loot. A fork of ExpensiveLad
 - **Covers what vanilla leaves out:** armor in a weight class vanilla never enchants for its material (heavy Elven, light
   Daedric, ...), shields of materials with no enchanted shields (Leather and Netch Leather included), and Ancient Nord
   weapons through the Draugr loadout lists.
+- **Enchants modded jewelry.** Plain rings, necklaces and circlets that mods add (the Creation Club's Nordic Jewelry,
+  ...) get every enchantment vanilla, Thaumaturgy and Summermyst put on enchanted jewelry of their slot ("Nordic Ring of
+  Minor Destruction", "Jester's Nordic Ring"), handed out beside those items at the level their list gives them. The
+  game's own jewelry is left as it is.
 - **Makes no duplicates.** A variant that already exists in the load order is not made again, and base items whose model
   file is missing are left out.
 - **Hands the variants out beside their vanilla twins.** For each vanilla enchanted list a variant belongs in, it makes a
@@ -46,6 +50,8 @@ On the patcher's Settings page in Synthesis, each with a tooltip:
 
 - **Items and enchantments:** detection from the load order, input files, and the materials, plugins and items to leave
   out.
+- **Jewelry:** variants of modded jewelry, the plugins besides the game whose enchantments it gets (Thaumaturgy and
+  Summermyst), and the most pieces a plugin may add before it is left out.
 - **Distribution:** handing variants out beside their vanilla twins, skipped duplicates, and the plugins whose items only
   go in Dragonborn lists.
 - **Names:** using SkyPatcher and Paths of Empyrean renames, matching enchantment names to the load order, and renaming

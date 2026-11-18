@@ -840,7 +840,7 @@ namespace EnchantedVariantsGenerator
             AssetIndex.Build(state);
             // What already reaches the world, and the vanilla enchanted lists the variants go beside (as they stand after SkyPatcher)
             var distribution = Distribution.Build(state, linkcache, dataPath);
-            var loot = LootDistribution.Build(state, linkcache, RuntimeLists.Build(state, linkcache));
+            var loot = LootDistribution.Build(state, linkcache, RuntimeLists.Build(state, linkcache), config);
             // With "Detect enchantments" on: discovered items grouped by kind, each with the enchantments its kind carries
             List<InputThing> detected = ItemDiscovery.Run(state, config, linkcache, dataPath, inputs, listedItems, distribution, loot);
 

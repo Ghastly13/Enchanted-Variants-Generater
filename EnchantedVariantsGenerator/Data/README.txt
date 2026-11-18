@@ -26,6 +26,21 @@ Where items and enchantments come from
   left out, except honed weapons crafted only from the plain weapon of their material: Heavy Armory's and the Fishing
   Creation Club's honed Ancient Nord weapons, which the player can hone, are loot of their own like vanilla's.
 
+  Jewelry (setting "Jewelry: variants of modded jewelry")
+  The plain rings, necklaces and circlets mods add, handed out as loot or crafted (the Creation Club's Nordic Ring,
+  Amulet and Circlet, made at the forge), get every enchantment the game's enchanted jewelry lists carry on items of
+  their slot, as a mod's armor gets those of its kind: LItemEnchRingAll, LItemEnchNecklaceAll, LItemEnchCircletAll,
+  LItemEnchJewelryAll (and their 15/25/75 copies) and every list under them, Thaumaturgy's and Summermyst's lists placed
+  there included. Only the enchantments of the game and the plugins in "Jewelry: also enchantments from" count, by
+  default Thaumaturgy and Summermyst: about 230 for rings, 210 for necklaces and 80 for circlets. The game's own pieces
+  get none: vanilla puts each enchantment and tier on a piece of its choosing (minor Fortify Destruction on the Silver
+  Ruby Ring), and that is left as it is. Quest jewelry, neither loot nor crafted, gets none either. A plugin with more
+  pieces than "Jewelry: most pieces per plugin" (100) is left out whole, as each piece makes some 200 items (Immersive
+  Jewelry has some 5,000 pieces). A piece's slot is its ClothingRing / ClothingNecklace / ClothingCirclet keyword (else
+  its body slot); jewelry carries ArmorJewelry or VendorItemJewelry. Creation Club pieces need "Items: include Creation
+  Club items". Names follow the items with the enchantment: around their piece's name, else around the noun ("Ring of
+  Minor Destruction" -> "Nordic Ring of Minor Destruction", Summermyst's "Jester's Ring" -> "Jester's Nordic Ring").
+
   Input files
   An "input" folder here, one subfolder per group: every enchantment file in a subfolder applies to every weapon/armor
   file in that same subfolder. Files are .hjson (or .json) with RequiredMods, Weapons / Armors and Enchantments
@@ -97,6 +112,11 @@ Distributed items
               OWL_Special_DLC2LItemEnchArmorLightCuirassLow. Each such list is one entry beside the whole Leather list
               there, as Open World Loot's Netch Leather patch does for the unenchanted pieces. Where the twins' list is
               itself a DLC2 one (Chitin, Stalhrim), the variants go in it as usual.
+    Jewelry   beside the items with the variant's enchantment: in the list holding most of the slot's items with it
+              (the game's own lists first), at the level that list gives them. Vanilla's lists hold one effect at six tiers
+              (LItemEnchRingDestruction: levels 1, 8, 16, 24, 32, 40), so LItemEnchRingDestruction_EVG holds the modded
+              rings' Fortify Destruction variants at those levels; Summermyst's lists give each enchantment its own level
+              (SUM_LVLI_Ring_IndividualEnchantments: Ring of the Forge at 5, Jester's Ring at 25), and the variants take it.
   The input files' LeveledLists entries now only give each enchantment's tier (the digits of its first non-NPC
   suffix). Each run writes "distributed items.txt" here: every list made and where it went, and every variant left
   out with the reason.

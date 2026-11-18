@@ -237,8 +237,12 @@ namespace EnchantedVariantsGenerator
             // Items crafted from another weapon or armor are upgrades of it (Masterwork, crossbow modifications), not bases:
             // each with the weapons and armor it is crafted from
             var upgrades = new Dictionary<FormKey, List<FormKey>>();
+            // Everything a recipe makes: jewelry a mod lets the player craft counts as loot of its own (the Creation Club's
+            // Nordic Jewelry has its plain pieces made at the forge, and hands out the enchanted ones by script)
+            var crafted = new HashSet<FormKey>();
             foreach (var recipe in state.LoadOrder.PriorityOrder.ConstructibleObject().WinningOverrides())
             {
+                if (!recipe.CreatedObject.IsNull) crafted.Add(recipe.CreatedObject.FormKey);
                 if (recipe.CreatedObject.IsNull || recipe.Items == null) continue;
                 foreach (var component in recipe.Items)
                 {
@@ -271,7 +275,7 @@ namespace EnchantedVariantsGenerator
 
             // The groups the item's variants are made in: its kind's detected enchantments, and the input folder for its type
             // and tier (unless an input file names it already). Null when there is at least one, else why not.
-            string? Targets(IMajorRecordGetter item, string folderName, List<InputThing> targets)
+            string? Targets(IMajorRecordGetter item, string folderName, List<InputThing> targets, string noFolder = "no input folder for Ancient Nord bows")
             {
                 string? why = null;
                 if (detect)
@@ -289,7 +293,7 @@ namespace EnchantedVariantsGenerator
                 }
                 if (toFolders && !listedItems.Contains(item.FormKey))
                 {
-                    if (folderName == "") why ??= "no input folder for Ancient Nord bows";
+                    if (folderName == "") why ??= noFolder;
                     else if (FolderCheck(folderName, out var folder) is string reason) why ??= reason;
                     else targets.Add(folder!);
                 }
@@ -383,17 +387,37 @@ namespace EnchantedVariantsGenerator
                 foreach (var target in targets) Add(target, weapon, name, materialName, false);
             }
 
+            var jewelry = new List<(IArmorGetter Armor, string? Name, JewelSlot Slot, List<InputThing> Targets)>();
             foreach (var armor in state.LoadOrder.PriorityOrder.Armor().WinningOverrides())
             {
                 if (!PluginAllowed(armor.FormKey.ModKey) || (!detect && listedItems.Contains(armor.FormKey))) continue;
                 if (!armor.TemplateArmor.IsNull || !armor.ObjectEffect.IsNull) continue;
                 var keywords = (armor.Keywords ?? Array.Empty<IFormLinkGetter<IKeywordGetter>>()).Select(k => KeywordID(k.FormKey)).ToList();
-                if (!keywords.Any(k => k.Contains("ArmorMaterial", StringComparison.OrdinalIgnoreCase))) continue;
                 string? name = armor.Name?.String;
-
                 bool playable = !armor.MajorFlags.HasFlag(Armor.MajorFlag.NonPlayable);
                 bool hasModel = AssetIndex.MeshPresent(armor.WorldModel?.Male?.Model?.File) || AssetIndex.MeshPresent(armor.WorldModel?.Female?.Model?.File);
-                string? reason = CommonChecks(armor, name, keywords, playable, hasModel);
+                string? reason;
+
+                // Jewelry: the plain rings, necklaces and circlets mods add, which take the enchantments of the game's
+                // enchanted jewelry lists (Jewelry.cs). The game's own pieces are left as the game made them. Added after
+                // the loop, once each plugin's count is known.
+                if (loot.JewelSlotOf(armor) is JewelSlot jewelSlot)
+                {
+                    if (!config.JewelryVariants || LootDistribution.IsGamePiece(armor)) continue;
+                    reason = CommonChecks(armor, name, keywords, playable, hasModel);
+                    if (reason != null) { Reject(armor, name, reason); continue; }
+                    var jewelTargets = new List<InputThing>();
+                    reason = Targets(armor, "", jewelTargets, "no input folder for jewelry");
+                    if (reason != null) { Reject(armor, name, reason); continue; }
+                    if (!distribution.IsDistributed(armor.FormKey) && !crafted.Contains(armor.FormKey)) { Reject(armor, name, "neither distributed nor crafted"); continue; }
+                    reason = VariantsUndistributed(armor);
+                    if (reason != null) { Reject(armor, name, reason); continue; }
+                    jewelry.Add((armor, name, jewelSlot, jewelTargets));
+                    continue;
+                }
+
+                if (!keywords.Any(k => k.Contains("ArmorMaterial", StringComparison.OrdinalIgnoreCase))) continue;
+                reason = CommonChecks(armor, name, keywords, playable, hasModel);
                 if (reason != null) { Reject(armor, name, reason); continue; }
                 if (upgrades.ContainsKey(armor.FormKey)) { Reject(armor, name, "crafted from another item (an upgrade)"); continue; }
 
@@ -440,6 +464,19 @@ namespace EnchantedVariantsGenerator
                 reason = VariantsUndistributed(armor);
                 if (reason != null) { Reject(armor, name, reason); continue; }
                 foreach (var target in targets) Add(target, armor, name, material.Name + " " + weight, true);
+            }
+
+            // Each jewelry piece gets every enchantment of its slot (some 200 for rings and necklaces), so a plugin with more
+            // pieces than "Jewelry: most pieces per plugin" (Immersive Jewelry has some 5,000) is left out whole
+            foreach (var byPlugin in jewelry.GroupBy(j => j.Armor.FormKey.ModKey))
+            {
+                int count = byPlugin.Count();
+                bool tooMany = count > config.JewelryMaxPiecesPerPlugin;
+                foreach (var (armor, name, slot, targets) in byPlugin)
+                {
+                    if (tooMany) { Reject(armor, name, "one of " + count + " jewelry pieces of its plugin, more than \"Jewelry: most pieces per plugin\" (" + config.JewelryMaxPiecesPerPlugin + ")"); continue; }
+                    foreach (var target in targets) Add(target, armor, name, "Jewelry " + slot, true);
+                }
             }
 
             // Kinds every item of which was then left out (not distributed, ...) make nothing
