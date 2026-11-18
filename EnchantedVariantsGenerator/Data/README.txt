@@ -17,8 +17,8 @@ Where items and enchantments come from
   Daedric) is found by its material keyword all the same and follows that material in the other class: heavy Elven
   boots get light Elven boots' enchantments and go where those are, mirrored into the heavy lists. An armor's weight
   class is its ArmorHeavy/ArmorLight keyword, else its armor type (shields, vanilla's included, carry no such keyword).
-  Its name must name its material: "Netch Leather" counts for Leather or Hide, as mods tag it either way, and Netch
-  Leather tagged Hide (Mihail's shield) is taken as Leather. Ancient Nord weapons follow the Draugr loadout
+  An item's material is its material keyword, whatever its name says ("Valkyn Katana", tagged Daedric, is Daedric).
+  Netch Leather tagged Hide (Mihail's shield) is taken as Leather. Ancient Nord weapons follow the Draugr loadout
   lists (frost; the honed greatsword's fire variants are in no list, only on Red Eagle and in Labyrinthian, so they
   are not used), daggers excepted: Draugr have no dagger animations, so Ancient Nord daggers get no variants. A kind
   with no enchanted items in those lists (Imperial armor) gets nothing.

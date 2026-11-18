@@ -109,9 +109,8 @@ namespace EnchantedVariantsGenerator
 
         private static readonly Regex CreationClub = new(@"^cc[a-z]+sse\d+", RegexOptions.IgnoreCase);
 
-        // Words in an item's name that name a material, longest first, each with the materials it is consistent with. The
-        // name is a second witness to the keywords: some mods tag items with a nearby vanilla material (a Forsworn halberd
-        // as Steel, an Ancient Nord helmet as Daedric), so the name must name the keyword's material and nothing else.
+        // Words in an item's name that name a material, longest first, each with the materials it is consistent with. Only
+        // used where an item's keywords name several materials (MaterialNameOf); the keywords alone decide otherwise.
         private static readonly (string Phrase, string[] Materials)[] NameWords =
         {
             ("Polished Silver", new[] { "PolishedSilver" }),
@@ -184,22 +183,6 @@ namespace EnchantedVariantsGenerator
             var named = candidates.Where(c => NameWords.Any(w => w.Materials.Contains(c, StringComparer.OrdinalIgnoreCase)
                 && Regex.IsMatch(" " + name + " ", @"\b" + Regex.Escape(w.Phrase) + @"\b", RegexOptions.IgnoreCase))).ToList();
             return named.Count == 1 ? named[0] : null;
-        }
-
-        // Null when the name names the material and no other, else why not
-        private static string? NameDisagrees(string name, string material)
-        {
-            string rest = " " + name + " ";
-            bool named = false;
-            foreach (var (phrase, materials) in NameWords)
-            {
-                var pattern = new Regex(@"\b" + Regex.Escape(phrase) + @"\b", RegexOptions.IgnoreCase);
-                if (!pattern.IsMatch(rest)) continue;
-                if (!materials.Contains(material, StringComparer.OrdinalIgnoreCase)) return "name says " + phrase + ", keywords say " + material;
-                named = true;
-                rest = pattern.Replace(rest, " ");
-            }
-            return named ? null : "name does not say its material (" + material + ")";
         }
 
         // Finds base items for detection ("Detect enchantments and items from the load order") and, with "Use input files"
@@ -369,8 +352,6 @@ namespace EnchantedVariantsGenerator
                 if (materialName.StartsWith("Draugr") && name!.Contains("Nord Hero", StringComparison.OrdinalIgnoreCase)) materialName = "NordHero";
                 if (upgrades.TryGetValue(weapon.FormKey, out var upgradeSources) && !Honing(materialName, upgradeSources)) { Reject(weapon, name, "crafted from another item (an upgrade)"); continue; }
                 if (excludedMaterials.Contains(materialName)) { Reject(weapon, name, "excluded material " + materialName); continue; }
-                reason = NameDisagrees(name!, materialName);
-                if (reason != null) { Reject(weapon, name, reason); continue; }
 
                 if (loot.AncientNordDagger(weapon)) { Reject(weapon, name, LootDistribution.AncientNordDaggerReason); continue; }
 
@@ -442,8 +423,6 @@ namespace EnchantedVariantsGenerator
                 }
                 if (material == null) { Reject(armor, name, why! + (heavy ? " (heavy)" : " (light)")); continue; }
                 if (excludedMaterials.Contains(material.Name)) { Reject(armor, name, "excluded material " + material.Name); continue; }
-                reason = NameDisagrees(name!, material.Name);
-                if (reason != null) { Reject(armor, name, reason); continue; }
                 string byName = NetchLeather(material.Name, name);
                 if (byName != material.Name) material = LightArmorMaterials.Concat(HeavyArmorMaterials).First(m => m.Name == byName);
 
