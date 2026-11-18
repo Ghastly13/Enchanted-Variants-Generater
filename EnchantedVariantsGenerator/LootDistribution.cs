@@ -932,6 +932,8 @@ namespace EnchantedVariantsGenerator
             foreach (var list in newLists.Values.OrderBy(n => n.EditorID, StringComparer.OrdinalIgnoreCase))
             {
                 var (record, made) = WriteList(config, list.EditorID, list.Items.Select(i => (i.Key, i.Value)).ToList(), _lists.Record(list.Target.FormKey).Flags);
+                // The EditorID it got (with _1, ... where another record had the one wanted)
+                list.EditorID = record.EditorID ?? list.EditorID;
                 listCount += made;
                 short minLevel = list.Items.Values.Min();
                 if (list.Holders != null)
@@ -1017,6 +1019,7 @@ namespace EnchantedVariantsGenerator
                         var source = _lists.Record(parent);
                         string id = OtherClassName(parentID, material, from, weight) + ListSuffix;
                         var record = NewRecord(config, id, source.Flags);
+                        id = record.EditorID ?? id;
                         record.ChanceNone = source.ChanceNone;
                         foreach (var (reference, level, count) in entries)
                         {
@@ -1050,6 +1053,7 @@ namespace EnchantedVariantsGenerator
                 }
                 string id = d.EditorID + ListSuffix;
                 var (record, made) = WriteList(config, id, entries, d.Placements != null ? d.Flags : _lists.Record(d.FormKey).Flags);
+                id = record.EditorID ?? id;
                 listCount += made;
 
                 // The copy of WACCF's bow list goes in once where WACCF's would be
@@ -1230,7 +1234,10 @@ namespace EnchantedVariantsGenerator
         // stay put. The vanilla list's calculation flags; no chance of nothing (the vanilla list already has its own).
         private LeveledItem NewRecord(Config config, string editorID, LeveledItem.Flag flags)
         {
-            LeveledItem list = config.CheckExistingGenerated && _linkCache.TryResolve<ILeveledItemGetter>(editorID, out var existing)
+            // Its own EditorID (with _1, _2, ... where a record has this one already); reused only from this patcher's
+            // own output, never another mod's list that has the EditorID
+            editorID = EditorIDs.Claim(editorID);
+            LeveledItem list = config.CheckExistingGenerated && _linkCache.TryResolve<ILeveledItemGetter>(editorID, out var existing) && existing.FormKey.ModKey == _state.PatchMod.ModKey
                 ? existing.DeepCopy()
                 : new LeveledItem(_state.PatchMod, editorID);
             list.Flags = flags & (LeveledItem.Flag.CalculateFromAllLevelsLessThanOrEqualPlayer | LeveledItem.Flag.CalculateForEachItemInCount | LeveledItem.Flag.UseAll | LeveledItem.Flag.SpecialLoot);

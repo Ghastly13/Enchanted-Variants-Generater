@@ -414,7 +414,8 @@ namespace EnchantedVariantsGenerator
         {
             Weapon weapon;
 
-            if (checkExistingGenerated && linkCache.TryResolve<IWeaponGetter>(editorID, out var weapon_Original))
+            // Only this patcher's own record from an earlier run: another mod's that has the EditorID is not to be copied
+            if (checkExistingGenerated && linkCache.TryResolve<IWeaponGetter>(editorID, out var weapon_Original) && weapon_Original.FormKey.ModKey == patchMod.ModKey)
             { // Get Enchanted Weapon if it already exists
                 alreadyExists = true;
                 weapon = weapon_Original.DeepCopy(weapontranslationmark);
@@ -447,7 +448,8 @@ namespace EnchantedVariantsGenerator
         {
             Armor armor;
 
-            if (checkExistingGenerated && linkCache.TryResolve<IArmorGetter>(editorID, out var armor_Original))
+            // Only this patcher's own record from an earlier run: another mod's that has the EditorID is not to be copied
+            if (checkExistingGenerated && linkCache.TryResolve<IArmorGetter>(editorID, out var armor_Original) && armor_Original.FormKey.ModKey == patchMod.ModKey)
             { // Get Enchanted Weapon if it already exists
                 alreadyExists = true;
                 armor = armor_Original.DeepCopy(armortranslationmark);
@@ -495,6 +497,8 @@ namespace EnchantedVariantsGenerator
                         if (config.AddDuplicatesToLeveledLists) stuff.Variants.Add(new GeneratedVariant(duplicate.FormKey, itemGetter, enchantmentInfo, true));
                         continue;
                     }
+                    // Its own EditorID: with _1, _2, ... where a record has this one already
+                    enchanted_item_EditorID = EditorIDs.Claim(enchanted_item_EditorID);
                     var enchanted_item = GetEnchantedWeapon(linkCache, state.PatchMod, enchanted_item_EditorID, config.CheckExistingGenerated, out var EnchantedItemAlreadyExists, enchantmentInfo.Enchantment.ToNullableLink(), itemGetter.ToNullableLink());
                     var enchanted_item_name = ItemNames.Compose(itemGetter.FormKey, itemGetter.Name?.String, enchantmentInfo);
 
@@ -637,6 +641,8 @@ namespace EnchantedVariantsGenerator
                         if (config.AddDuplicatesToLeveledLists) stuff.Variants.Add(new GeneratedVariant(duplicate.FormKey, itemGetter, enchantmentInfo, true));
                         continue;
                     }
+                    // Its own EditorID: with _1, _2, ... where a record has this one already
+                    enchanted_item_EditorID = EditorIDs.Claim(enchanted_item_EditorID);
                     var enchanted_item = GetEnchantedArmor(linkCache, state.PatchMod, enchanted_item_EditorID, config.CheckExistingGenerated, out var EnchantedItemAlreadyExists, enchantmentInfo.Enchantment.ToNullableLink(), itemGetter.ToNullableLink());
                     var enchanted_item_name = ItemNames.Compose(itemGetter.FormKey, itemGetter.Name?.String, enchantmentInfo);
 
@@ -742,7 +748,8 @@ namespace EnchantedVariantsGenerator
             var index = new DuplicateIndex();
             foreach (var weapon in state.LoadOrder.PriorityOrder.Weapon().WinningOverrides())
             {
-                if (weapon.Template.IsNull || weapon.ObjectEffect.IsNull) continue;
+                // This patcher's own output from an earlier run is no duplicate
+                if (weapon.Template.IsNull || weapon.ObjectEffect.IsNull || weapon.FormKey.ModKey == state.PatchMod.ModKey) continue;
                 if (weapon.Data != null && weapon.Data.Flags.HasFlag(WeaponData.Flag.NonPlayable)) continue;
                 index.Add(weapon.Template.FormKey, weapon.ObjectEffect.FormKey, new ExistingVariant(weapon.FormKey, weapon.EditorID));
             }
@@ -755,7 +762,8 @@ namespace EnchantedVariantsGenerator
             var index = new DuplicateIndex();
             foreach (var armor in state.LoadOrder.PriorityOrder.Armor().WinningOverrides())
             {
-                if (armor.TemplateArmor.IsNull || armor.ObjectEffect.IsNull) continue;
+                // This patcher's own output from an earlier run is no duplicate
+                if (armor.TemplateArmor.IsNull || armor.ObjectEffect.IsNull || armor.FormKey.ModKey == state.PatchMod.ModKey) continue;
                 if (armor.MajorFlags.HasFlag(Armor.MajorFlag.NonPlayable)) continue;
                 index.Add(armor.TemplateArmor.FormKey, armor.ObjectEffect.FormKey, new ExistingVariant(armor.FormKey, armor.EditorID));
             }
@@ -854,20 +862,20 @@ namespace EnchantedVariantsGenerator
             }
 
             Console.WriteLine("Running Generator");
+            // New records' EditorIDs: each its own (EditorIDs.Claim)
+            EditorIDs.Build(state);
             // Detected groups first, so where an input file names the same item and enchantment, the load order's tier,
-            // charge and name win; input files then add only what detection did not make
+            // charge and name win; input files then add only what detection did not make. One group at a time, so the
+            // EditorIDs (and with them the FormIDs) are given out in the same order on every run.
             var claimed = new ConcurrentDictionary<(FormKey, FormKey), byte>();
             List<Task<UnsafeThreadStuff>> tasks = new();
             foreach (var batch in new[] { detected, inputs })
             {
-                var started = new List<Task<UnsafeThreadStuff>>();
                 foreach (var input in batch)
                 {
-                    started.Add(Task<UnsafeThreadStuff>.Factory.StartNew(() => GenerateArmor(state, config, input, linkcache, armorDuplicates, claimed)));
-                    started.Add(Task<UnsafeThreadStuff>.Factory.StartNew(() => GenerateWeapon(state, config, input, linkcache, weaponDuplicates, claimed)));
+                    tasks.Add(Task.FromResult(GenerateArmor(state, config, input, linkcache, armorDuplicates, claimed)));
+                    tasks.Add(Task.FromResult(GenerateWeapon(state, config, input, linkcache, weaponDuplicates, claimed)));
                 }
-                Task.WaitAll(started.ToArray());
-                tasks.AddRange(started);
             }
             Console.WriteLine("Generated from " + detected.Count + " kinds with detected enchantments and " + inputs.Count + " input folders");
             AssetIndex.Report();
