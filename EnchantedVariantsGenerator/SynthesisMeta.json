@@ -1,7 +1,7 @@
 {
   "Nickname": "EnchantedVariantsGenerator",
   "Visibility": "Visible",
-  "OneLineDescription": "",
+  "OneLineDescription": "Luridum's version of ExpensiveLadder's Enchanted Variants Generator: makes enchanted variants of every weapon and armor in the load order and hands them out beside their vanilla twins through SkyPatcher INIs.",
   "LongDescription": "",
   "PreferredAutoVersioning": "Default",
   "RequiredMods": [],
