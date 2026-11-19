@@ -24,7 +24,9 @@ Where items and enchantments come from
   with no enchanted items in those lists (Imperial armor) gets nothing.
   Items crafted from another weapon or armor (Masterwork pieces, enhanced crossbows) are upgrades, not bases, and are
   left out, except honed weapons crafted only from the plain weapon of their material: Heavy Armory's and the Fishing
-  Creation Club's honed Ancient Nord weapons, which the player can hone, are loot of their own like vanilla's.
+  Creation Club's honed Ancient Nord weapons, which the player can hone, are loot of their own like vanilla's. The other
+  hand of a pair (below) crafted from its first hand is no upgrade either (Paths of Empyrean makes Forsworn Claws Left
+  from Forsworn Claws).
 
   Jewelry (setting "Jewelry: variants of modded jewelry")
   The plain rings, necklaces and circlets mods add, handed out as loot or crafted (the Creation Club's Nordic Ring,
@@ -112,6 +114,14 @@ Distributed items
               OWL_Special_DLC2LItemEnchArmorLightCuirassLow. Each such list is one entry beside the whole Leather list
               there, as Open World Loot's Netch Leather patch does for the unenchanted pieces. Where the twins' list is
               itself a DLC2 one (Chitin, Stalhrim), the variants go in it as usual.
+    Pairs     weapons a mod hands out in pairs, a weapon and its left-hand counterpart in a "use all" list (Animated
+              Armoury's claws: LItemIronClaws holds Iron Claws and Iron Claws Left), go out in pairs, as Animated Armoury's
+              own enchanted claws (Talons of Woe) do: each variant with its other hand's variant of the same enchantment, in
+              a "use all" list, Ench_IronClaws_EnchWeaponFireDamage01_Pair. A pair takes one place in its list above, where
+              its right hand would go (SublistEnchIronDaggerFire_EVG), in a list of its own beside the twins with its
+              enchantment: Ench_IronClaws_EnchWeaponFireDamage01_PairDiluted holds the pair once and Iron Dagger of Fire 4
+              times (setting "Weapon pairs: twins beside each pair"), so the claws come once in 5 there. A variant whose
+              other hand has none with its enchantment is left out.
     Jewelry   beside the items with the variant's enchantment: in the list holding most of the slot's items with it
               (the game's own lists first), at the level that list gives them. Vanilla's lists hold one effect at six tiers
               (LItemEnchRingDestruction: levels 1, 8, 16, 24, 32, 40), so LItemEnchRingDestruction_EVG holds the modded

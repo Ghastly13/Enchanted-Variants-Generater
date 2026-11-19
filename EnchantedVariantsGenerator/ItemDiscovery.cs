@@ -350,7 +350,9 @@ namespace EnchantedVariantsGenerator
                 string materialName = material.Name;
                 // Nord Hero weapons carry the honed Draugr keyword; only their name tells them apart
                 if (materialName.StartsWith("Draugr") && name!.Contains("Nord Hero", StringComparison.OrdinalIgnoreCase)) materialName = "NordHero";
-                if (upgrades.TryGetValue(weapon.FormKey, out var upgradeSources) && !Honing(materialName, upgradeSources)) { Reject(weapon, name, "crafted from another item (an upgrade)"); continue; }
+                // Nor is the other hand of a pair (Paths of Empyrean makes Forsworn Claws Left from Forsworn Claws)
+                if (upgrades.TryGetValue(weapon.FormKey, out var upgradeSources) && !Honing(materialName, upgradeSources)
+                    && !upgradeSources.All(s => s == loot.PairPartner(weapon.FormKey))) { Reject(weapon, name, "crafted from another item (an upgrade)"); continue; }
                 if (excludedMaterials.Contains(materialName)) { Reject(weapon, name, "excluded material " + materialName); continue; }
 
                 if (loot.AncientNordDagger(weapon)) { Reject(weapon, name, LootDistribution.AncientNordDaggerReason); continue; }

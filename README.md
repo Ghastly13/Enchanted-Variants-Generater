@@ -21,7 +21,8 @@ variants of weapons and armor and hands them out as loot. A fork of ExpensiveLad
 - **Hands the variants out beside their vanilla twins.** For each vanilla enchanted list a variant belongs in, it makes a
   list of the variants at the same tiers and adds it to the vanilla list through SkyPatcher INIs that apply after every
   other mod's. Anything that draws from the vanilla lists, Open World Loot included, then hands them out. Netch Leather
-  variants only go in Dragonborn (Solstheim) lists.
+  variants only go in Dragonborn (Solstheim) lists. Weapons a mod hands out in pairs (Animated Armoury's claws and left
+  claws) go out in pairs with the same enchantment, among 4 enchanted daggers of that enchantment for each pair.
 - **Names them the way the load order does,** SkyPatcher and Paths of Empyrean renames included, and can rename existing
   enchanted items to match.
 - **Patches V.A.E.R. - Visual Animated Enchants Reborn** against the load order, so its visuals survive later mods.
@@ -52,8 +53,8 @@ On the patcher's Settings page in Synthesis, each with a tooltip:
   out.
 - **Jewelry:** variants of modded jewelry, the plugins besides the game whose enchantments it gets (Thaumaturgy and
   Summermyst), and the most pieces a plugin may add before it is left out.
-- **Distribution:** handing variants out beside their vanilla twins, skipped duplicates, and the plugins whose items only
-  go in Dragonborn lists.
+- **Distribution:** handing variants out beside their vanilla twins, skipped duplicates, the plugins whose items only
+  go in Dragonborn lists, and how many twins go beside each pair of weapons handed out in pairs.
 - **Names:** using SkyPatcher and Paths of Empyrean renames, matching enchantment names to the load order, and renaming
   existing enchanted items.
 - **V.A.E.R.**, reusing records from earlier runs, and verbose logging.

@@ -37,6 +37,7 @@ namespace EnchantedVariantsGenerator
     //             their own (DLC2SublistEnchArmorLeatherCuirass01_EVG), added beside it only in the lists with DLC2 in their
     //             name that hold it (DLC2LItemEnchArmorLightCuirass, OWL_Special_DLC2...), at the same level and count.
     //   Jewelry   beside the game's enchanted jewelry with the same enchantment, at the level its list gives it (Jewelry.cs).
+    //   Pairs     weapons a mod hands out in pairs (Animated Armoury's claws): both hands together, among their twins (Pairs.cs).
     // The lists are read as the game holds them after SkyPatcher (RuntimeLists), and the INI is nested deeper than any
     // other mod's (SkyPatcher applies shallow folders first, see SkyPatcherOrder), so its additions land on the finished lists.
     public partial class LootDistribution
@@ -776,6 +777,7 @@ namespace EnchantedVariantsGenerator
             var draugrNew = new Dictionary<FormKey, DraugrNewList>();
             var skipped = new SortedDictionary<string, SortedDictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
             int placed = 0, alreadyListed = 0;
+            var halves = new List<PairHalf>();
             // Items handed out on Solstheim only, by plugin or EditorID
             var dlc2Only = new HashSet<string>((config.Dlc2OnlyItems ?? new()).Select(s => s.Trim()).Where(s => s.Length > 0), StringComparer.OrdinalIgnoreCase);
             bool OnlyDlc2(IMajorRecordGetter baseItem) =>
@@ -893,9 +895,14 @@ namespace EnchantedVariantsGenerator
                     continue;
                 }
                 short level = target.Target.LevelFor(tier);
+                // Weapons handed out in pairs: placed once both hands are known (PlacePairs)
+                if (!armor && PairPartner(v.BaseItem.FormKey) != null) { halves.Add(new PairHalf(v, target, level, tier)); continue; }
                 target.Items[v.FormKey] = target.Items.TryGetValue(v.FormKey, out var l) ? Math.Min(l, level) : level;
                 placed++;
             }
+            var pairReport = new List<string>();
+            var (pairLists, pairsPlaced) = PlacePairs(config, halves, (reason, v) => Skip(reason, v), pairReport);
+            placed += pairsPlaced;
 
             // Records and INI lines
             var ini = new StringBuilder();
@@ -925,7 +932,7 @@ namespace EnchantedVariantsGenerator
                 movesReport.Add("  " + move.MovedID + " in " + ListName(move.List) + ": level " + from + " -> " + move.To + ", as " + move.Model + " in " + move.ModelList);
             }
 
-            int listCount = 0;
+            int listCount = pairLists;
             var dlc2Report = new List<string>();
             var standInReport = new List<string>();
             var otherClass = new Dictionary<string, Dictionary<FormKey, (FormKey New, string Material)>>();
@@ -1096,6 +1103,10 @@ namespace EnchantedVariantsGenerator
             text.AppendLine();
             text.AppendLine("== Beside their vanilla twins (" + newLists.Values.Count(n => n.Weight == null && n.Holders == null) + " lists)");
             text.Append(report);
+            text.AppendLine();
+            text.AppendLine("== Weapons handed out in pairs (" + pairReport.Count + " kinds), each variant with its other hand's of the same enchantment in a \"use all\" list (<variant>_Pair)"
+                + (config.PairDilution > 0 ? ", in the lists above beside " + config.PairDilution + " of its twins (<variant>_PairDiluted)" : ", in the lists above"));
+            foreach (var line in pairReport) text.AppendLine(line);
             text.AppendLine();
             text.AppendLine("== Mods' shield lists moved to their material's levels (" + movesReport.Count + ")");
             foreach (var line in movesReport) text.AppendLine(line);

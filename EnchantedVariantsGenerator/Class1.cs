@@ -39,6 +39,11 @@ namespace EnchantedVariantsGenerator
         [SynthesisTooltip("Plugins (or base item EditorIDs) whose variants are handed out on Solstheim only, such as Netch Leather (the Creation Club's, and Mihail's Netch Leather Armor). Where their vanilla twins' list is one the rest of Skyrim uses too (SublistEnchArmorLeatherCuirass01), they go in a list of their own (DLC2SublistEnchArmorLeatherCuirass01_EVG) added beside it only in the lists with DLC2 in their name that hold it (DLC2LItemEnchArmorLightCuirass, Open World Loot's OWL_Special_DLC2... lists), at the same level; where none holds it (Leather shields), in the Dragonborn counterparts of the lists that do (LItemEnchArmorLightShield -> DLC2LItemEnchArmorLightShield).")]
         public List<string> Dlc2OnlyItems { get; set; } = new() { "ccbgssse041-netchleather.esl", "mihailnetcharmor.esp" };
 
+        [SynthesisOrder]
+        [SynthesisSettingName("Weapon pairs: twins beside each pair")]
+        [SynthesisTooltip("Weapons a mod hands out in pairs, a weapon and its left-hand counterpart in a \"use all\" list (Animated Armoury's claws: Iron Claws and Iron Claws Left), get their variants handed out in pairs too: each variant with its other hand's variant of the same enchantment. Each pair goes in among this many of its twins, the enchanted items with the same enchantment (Iron Dagger of Fire for Iron Claws of Fire), so with 4 a pair comes once in 5 where it is handed out. 0: the pair alone.")]
+        public int PairDilution { get; set; } = 4;
+
         // Where the items and enchantments come from: the load order, the input files, or both (one item and enchantment
         // pair is made once either way)
         [SynthesisOrder]
